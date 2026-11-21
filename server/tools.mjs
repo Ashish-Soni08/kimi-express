@@ -105,17 +105,40 @@ async function geocodeNominatim(q, near) {
   };
 }
 
+// Sight ideas from Photon (fast and reliable), used alongside Overpass, which is often overloaded.
+async function photonSights(center, cityName, kinds, limit) {
+  const want = kinds?.length ? kinds : ["attraction", "museum", "viewpoint", "gallery"];
+  const tags = want.map((k) => `&osm_tag=tourism:${encodeURIComponent(k)}`).join("");
+  const terms = [cityName, "museum", "Sehenswürdigkeit"].filter(Boolean);
+  const results = await Promise.all(
+    terms.map((t) =>
+      getJson(`${PHOTON}/api/?q=${encodeURIComponent(t)}${tags}&lat=${center.lat}&lon=${center.lon}&location_bias_scale=0.9&limit=15&lang=en`, { timeoutMs: 5000 })
+        .then((r) => r.features || [])
+        .catch(() => []),
+    ),
+  );
+  const seen = new Set();
+  return results
+    .flat()
+    .map((f) => ({ name: f.properties?.name, lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], kind: f.properties?.osm_value }))
+    .filter((p) => p.name && !seen.has(p.name) && seen.add(p.name))
+    .map((p) => ({ ...p, kmFromCenter: round(haversineKm(center, p)) }))
+    .filter((p) => p.kmFromCenter < 8)
+    .sort((a, b) => a.kmFromCenter - b.kmFromCenter)
+    .slice(0, limit);
+}
+
 async function attractionsNear(center, kinds, limit) {
   const want = kinds?.length ? kinds : ["attraction", "museum", "viewpoint", "gallery"];
   const filters = want
     .map((k) => `nwr(around:3500,${center.lat},${center.lon})["tourism"="${k.replace(/"/g, "")}"]["name"];`)
     .join("");
-  const q = `[out:json][timeout:8];(${filters});out center tags 60;`;
-  // Ask all mirrors at once and take the first good answer; give up after 8 s so the demo stays fast.
+  const q = `[out:json][timeout:4];(${filters});out center tags 60;`;
+  // Ask all mirrors at once and take the first good answer; give up after 4 s so the demo stays fast.
   const data = await Promise.any(
     OVERPASS.map((url) =>
       getJson(url, {
-        timeoutMs: 8000,
+        timeoutMs: 4000,
         init: { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } },
       }),
     ),
@@ -140,7 +163,9 @@ export async function find_places({ city, places = [], discover = false, kinds, 
   const center = city ? await geocodeOne(city) : null;
   const near = center?.found ? center : null;
   const sugg = (discover || !places.length) && near
-    ? attractionsNear(near, kinds, Math.min(limit, 15)).catch((e) => [{ error: "Sight suggestions unavailable: " + (e.message || e) }])
+    ? attractionsNear(near, kinds, Math.min(limit, 15))
+        .catch(() => photonSights(near, city, kinds, Math.min(limit, 15)))
+        .catch((e) => [{ error: "Sight suggestions unavailable: " + (e.message || e) }])
     : Promise.resolve([]);
   const found = await Promise.all(
     places.map((q) => {

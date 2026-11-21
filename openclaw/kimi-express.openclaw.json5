@@ -9,6 +9,7 @@
         model: { primary: "cerebras/moonshotai-kimi-k3.1-pro-trial", fallbacks: [] },
         thinkingDefault: "off",
         skills: [],
+        contextInjection: "never", // the dashboard sends its own system prompt; skip workspace bootstrap files
         tools: {
           profile: "minimal",
           alsoAllow: ["find_places", "search_trains", "travel_between", "publish_plan", "save_trip", "list_trips"],

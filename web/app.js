@@ -77,7 +77,8 @@ function showMetrics(m) {
   $("#m-ttft").textContent = m.firstTokenMs ? (m.firstTokenMs / 1000).toFixed(2) + " s" : "—";
   $("#m-tools").textContent = `${m.toolCalls} · ${(m.toolMs / 1000).toFixed(1)} s`;
   $("#m-tokens").textContent = (m.completionTokens ?? "—").toLocaleString() + (m.estimated ? "≈" : "");
-  $("#timer").textContent = `model ${(m.modelMs / 1000).toFixed(1)} s · tools ${(m.toolMs / 1000).toFixed(1)} s`;
+  const turns = (m.turns || []).map((t) => (t / 1000).toFixed(1) + "s").join(" · ");
+  $("#timer").textContent = `Kimi turns ${turns || "—"} · tools ${(m.toolMs / 1000).toFixed(1)} s`;
 }
 
 // ---------- agent activity feed ----------

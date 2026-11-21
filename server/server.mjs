@@ -55,17 +55,18 @@ async function runTool(name, args, lane = "cerebras") {
   const t0 = performance.now();
   broadcast({ type: "tool_start", id, name, args, lane });
   if (run && run.firstToolMs == null) run.firstToolMs = performance.now() - run.t0;
+  if (run) run.marks.push({ k: "start", t: performance.now() - run.t0 });
   console.log(`[${lane}] → ${name} ${JSON.stringify(args).slice(0, 160)}`);
   try {
     const result = await fn(args || {});
     const ms = Math.round(performance.now() - t0);
-    if (run) run.toolMs += ms, run.toolCalls++;
+    if (run) run.toolMs += ms, run.toolCalls++, run.marks.push({ k: "end", t: performance.now() - run.t0 });
     broadcast({ type: "tool_end", id, name, args, result, ms, lane });
     console.log(`[${lane}] ✓ ${name} ${ms} ms`);
     return result;
   } catch (e) {
     const ms = Math.round(performance.now() - t0);
-    if (run) run.toolMs += ms, run.toolCalls++;
+    if (run) run.toolMs += ms, run.toolCalls++, run.marks.push({ k: "end", t: performance.now() - run.t0 });
     broadcast({ type: "tool_error", id, name, args, error: String(e.message || e), ms, lane });
     console.log(`[${lane}] ✗ ${name} ${ms} ms: ${e.message || e}`);
     throw e;
@@ -98,7 +99,7 @@ async function plan(req, res) {
   const ping = setInterval(() => res.write(": ping\n\n"), 15000);
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Berlin", weekday: "long", year: "numeric", month: "2-digit", day: "2-digit" });
-  const me = { t0: performance.now(), toolMs: 0, toolCalls: 0, firstTokenMs: null };
+  const me = { t0: performance.now(), toolMs: 0, toolCalls: 0, firstTokenMs: null, marks: [] };
   runs.set(lane, me);
   // With several OpenClaw agents configured, the session key must name its agent.
   const agentId = AGENT.replace(/^openclaw[/:]/, "").replace(/^agent:/, "") || "main";
@@ -162,7 +163,17 @@ async function plan(req, res) {
     const totalMs = performance.now() - me.t0;
     const completion = usage?.completion_tokens ?? Math.round(text.length / 4);
     const modelMs = Math.max(1, totalMs - me.toolMs);
+    // Agent turns: the gaps when no tool was running (request -> first tool, between tool rounds, last tool -> end).
+    // Each gap is one Kimi turn plus OpenClaw's own per-turn overhead.
+    const turns = [];
+    let busy = 0, last = 0;
+    for (const m of me.marks.sort((a, b) => a.t - b.t)) {
+      if (m.k === "start") { if (busy === 0 && m.t - last > 50) turns.push(Math.round(m.t - last)); busy++; }
+      else { busy = Math.max(0, busy - 1); if (busy === 0) last = m.t; }
+    }
+    turns.push(Math.round(totalMs - last));
     const metrics = {
+      turns,
       type: "metrics",
       lane,
       totalMs: Math.round(totalMs),

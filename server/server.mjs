@@ -7,7 +7,7 @@ import { request as httpsRequest } from "node:https";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TOOLS, list_trips, save_trip, delete_trip } from "./tools.mjs";
+import { TOOLS, list_trips, save_trip, delete_trip, get_trip } from "./tools.mjs";
 import { SYSTEM_PROMPT } from "./prompt.mjs";
 
 const PORT = +(process.env.KX_PORT || 5177);
@@ -243,6 +243,10 @@ createServer(async (req, res) => {
       const r = await save_trip(b);
       broadcast({ type: "trips_changed" });
       return json(res, 200, r);
+    }
+    if (url.pathname.startsWith("/api/trips/") && req.method === "GET") {
+      const trip = await get_trip({ id: decodeURIComponent(url.pathname.slice("/api/trips/".length)) });
+      return trip ? json(res, 200, trip) : json(res, 404, { error: "not found" });
     }
     if (url.pathname.startsWith("/api/trips/") && req.method === "DELETE") {
       await delete_trip({ id: decodeURIComponent(url.pathname.slice("/api/trips/".length)) });

@@ -137,6 +137,7 @@ function feedAdd(id, cls, html) {
 
 // ---------- tool results -> map ----------
 let lastPlaces = [];
+let lastRoutes = []; // street routes from travel_between, stored with a saved trip
 function onToolResult(name, args, r) {
   if (name === "find_places" && r) {
     lastPlaces = (r.places || []).filter((p) => p.found);
@@ -148,6 +149,7 @@ function onToolResult(name, args, r) {
   }
   if (name === "travel_between" && r) {
     for (const leg of r.legs || []) {
+      if (leg.geometry?.length) lastRoutes.push({ geometry: leg.geometry, mode: leg.recommended, label: `${leg.from} → ${leg.to}: ${leg.minutes} min (${leg.recommended})` });
       L.polyline(leg.geometry, { color: leg.recommended === "transit" ? "#5b8cff" : "#f05a28", weight: 4, opacity: 0.85, dashArray: leg.recommended === "transit" ? "6 6" : null })
         .bindTooltip(`${esc(leg.from)} → ${esc(leg.to)}: ${leg.minutes} min (${leg.recommended})`)
         .addTo(routeLayer);
@@ -203,7 +205,7 @@ function renderPlan(plan) {
 }
 async function saveCurrent() {
   if (!currentPlan) return;
-  const r = await fetch("/api/trips", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: currentPlan, status: "planned" }) }).then((r) => r.json());
+  const r = await fetch("/api/trips", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: { ...currentPlan, routes: currentPlan.routes || lastRoutes }, status: "planned" }) }).then((r) => r.json());
   currentPlan.id = r.id;
   const b = $("#save"); b.textContent = "✓ Saved to trip log"; b.classList.add("saved");
 }
@@ -225,8 +227,21 @@ async function loadTrips() {
       <div class="actions"><button data-a="done">Mark done</button><button data-a="del">Delete</button></div>`;
     li.querySelector('[data-a="done"]').onclick = async (e) => { e.stopPropagation(); await fetch("/api/trips", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: { id: t.id }, status: "done" }) }); };
     li.querySelector('[data-a="del"]').onclick = async (e) => { e.stopPropagation(); await fetch("/api/trips/" + encodeURIComponent(t.id), { method: "DELETE" }); };
+    li.title = "Show this trip on the map";
+    li.dataset.testid = "trip-item";
+    li.onclick = () => openTrip(t.id);
     $("#log").appendChild(li);
   }
+}
+// Re-open a saved trip: plan panel, numbered stops and its stored routes on the map.
+async function openTrip(id) {
+  const t = await fetch("/api/trips/" + encodeURIComponent(id)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!t) return;
+  routeLayer.clearLayers();
+  for (const r of t.routes || []) L.polyline(r.geometry, { color: r.mode === "transit" ? "#5b8cff" : "#f05a28", weight: 4, opacity: 0.85, dashArray: r.mode === "transit" ? "6 6" : null }).bindTooltip(esc(r.label || "")).addTo(routeLayer);
+  suggLayer.clearLayers();
+  renderPlan(t);
+  const b = $("#save"); if (b) { b.textContent = t.status === "done" ? "✓ Done · in your trip log" : "✓ In your trip log"; b.classList.add("saved"); }
 }
 function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
@@ -354,6 +369,7 @@ async function ask(prompt) {
   racing = !!(gpuInfo && $("#race-on")?.checked);
   feedClear();
   routeLayer.clearLayers();
+  lastRoutes = [];
   feedAdd("k", "run", `<span class="t">🧠 Kimi K3.1 Pro</span><span class="ms">thinking</span><div class="sub">via OpenClaw → Cerebras</div>`);
   $("#answer").textContent = "";
   $("#answer").classList.remove("muted");

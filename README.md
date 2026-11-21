@@ -104,6 +104,7 @@ The dashboard opens in trip mode. Add `?speed=1` to the URL (`http://127.0.0.1:5
 | `[data-testid="status"]` | One-line status under the button ("Checking Deutsche Bahn trains…", "Your day is planned ✓") |
 | `[data-testid="race-toggle"]` | "Race vs GPU" checkbox (only with `?speed=1` and `KX_GPU_MODEL` set; remembered per browser) |
 | `[data-plan-ready]` / `[data-testid="plan-complete"]` | Hidden marker added once the Cerebras plan is fully rendered (trains, map, timeline, metrics) |
+| `[data-testid="trip-item"]` | A saved trip in the Trip log; click to reopen it on the map and in the plan panel |
 | `[data-testid="race-complete"]` | Hidden marker added once both race lanes finished |
 | `[data-testid="race-verdict"]` | "Cerebras finished N× faster" text |
 | `body[data-state]` | `idle`, `running`, `done` or `error` |

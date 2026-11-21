@@ -404,6 +404,10 @@ export async function list_trips({ city, limit = 20 } = {}) {
   };
 }
 
+export async function get_trip({ id }) {
+  return (await readTrips()).find((t) => t.id === id) || null;
+}
+
 export async function delete_trip({ id }) {
   const trips = await readTrips();
   await writeTrips(trips.filter((t) => t.id !== id));

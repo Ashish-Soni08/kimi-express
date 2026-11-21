@@ -100,7 +100,9 @@ async function plan(req, res) {
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Berlin", weekday: "long", year: "numeric", month: "2-digit", day: "2-digit" });
   const me = { t0: performance.now(), toolMs: 0, toolCalls: 0, firstTokenMs: null };
   runs.set(lane, me);
-  const sessionKey = `kx-${lane}-${conversation || "x"}-${Date.now().toString(36)}`;
+  // With several OpenClaw agents configured, the session key must name its agent.
+  const agentId = AGENT.replace(/^openclaw[/:]/, "").replace(/^agent:/, "") || "main";
+  const sessionKey = `agent:${agentId === "default" ? "main" : agentId}:kx-${lane}-${conversation || "x"}-${Date.now().toString(36)}`;
   broadcast({ type: "run_start", prompt, lane });
 
   const ctrl = new AbortController();
@@ -115,6 +117,7 @@ async function plan(req, res) {
         "Content-Type": "application/json",
         ...(GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}),
         "x-openclaw-session-key": sessionKey,
+        ...(agentId !== "default" ? { "x-openclaw-agent-id": agentId } : {}),
         ...(lane === "gpu" ? { "x-openclaw-model": GPU_MODEL } : {}),
       },
       JSON.stringify({

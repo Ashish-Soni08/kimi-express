@@ -11,7 +11,7 @@ const UA = process.env.KX_USER_AGENT || "kimi-express/0.1 (hackathon day-trip pl
 const DB_REST = process.env.KX_DB_REST || "https://v6.db.transport.rest";
 const TRANSITOUS = process.env.KX_TRANSITOUS || "https://api.transitous.org";
 const NOMINATIM = process.env.KX_NOMINATIM || "https://nominatim.openstreetmap.org";
-const OVERPASS = process.env.KX_OVERPASS || "https://overpass-api.de/api/interpreter";
+const OVERPASS = (process.env.KX_OVERPASS || "https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter").split(",");
 const OSRM_FOOT = process.env.KX_OSRM_FOOT || "https://routing.openstreetmap.de/routed-foot/route/v1/foot";
 const TRIPS_FILE = process.env.KX_TRIPS_FILE || fileURLToPath(new URL("../data/trips.json", import.meta.url));
 
@@ -82,10 +82,17 @@ async function attractionsNear(center, kinds, limit) {
     .map((k) => `nwr(around:3500,${center.lat},${center.lon})["tourism"="${k.replace(/"/g, "")}"]["name"];`)
     .join("");
   const q = `[out:json][timeout:20];(${filters});out center tags 60;`;
-  const data = await getJson(OVERPASS, {
-    timeoutMs: 25000,
-    init: { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } },
-  });
+  let data, lastErr;
+  for (const url of OVERPASS) {
+    try {
+      data = await getJson(url, {
+        timeoutMs: 15000,
+        init: { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } },
+      });
+      break;
+    } catch (e) { lastErr = e; }
+  }
+  if (!data) throw lastErr;
   const seen = new Set();
   return data.elements
     .map((e) => ({
@@ -181,13 +188,20 @@ async function transitousGeocode(name) {
   throw new Error(`Transitous could not find "${name}"`);
 }
 
-async function trainsViaTransitous(from, to, when, arriveBy, results) {
-  const [a, b] = await Promise.all([transitousGeocode(from), transitousGeocode(to)]);
+const MODE_PREFIX = { HIGHSPEED_RAIL: "ICE", LONG_DISTANCE: "IC", NIGHT_RAIL: "NJ", REGIONAL_FAST_RAIL: "RE", REGIONAL_RAIL: "RB", SUBURBAN: "S", SUBWAY: "U", METRO: "U", TRAM: "Tram", BUS: "Bus", COACH: "Bus", FERRY: "Ferry" };
+function motisLine(l) {
+  const named = l.displayName || l.tripShortName || l.routeShortName;
+  if (named && /[A-Za-z]/.test(named)) return named;
+  const prefix = MODE_PREFIX[l.mode] || l.mode;
+  return named ? `${prefix} ${named}` : prefix;
+}
+
+async function transitousPlan(a, b, when, arriveBy, n) {
   let data, lastErr;
   for (const v of ["v5", "v4", "v1"]) {
     try {
       data = await getJson(
-        `${TRANSITOUS}/api/${v}/plan?fromPlace=${a.lat},${a.lon}&toPlace=${b.lat},${b.lon}&time=${encodeURIComponent(new Date(when).toISOString())}&arriveBy=${!!arriveBy}&numItineraries=${results}`,
+        `${TRANSITOUS}/api/${v}/plan?fromPlace=${a.lat},${a.lon}&toPlace=${b.lat},${b.lon}&time=${encodeURIComponent(new Date(when || Date.now()).toISOString())}&arriveBy=${!!arriveBy}&numItineraries=${n}`,
         { timeoutMs: 20000 },
       );
       break;
@@ -196,6 +210,12 @@ async function trainsViaTransitous(from, to, when, arriveBy, results) {
     }
   }
   if (!data) throw lastErr;
+  return data;
+}
+
+async function trainsViaTransitous(from, to, when, arriveBy, results) {
+  const [a, b] = await Promise.all([transitousGeocode(from), transitousGeocode(to)]);
+  const data = await transitousPlan(a, b, when, arriveBy, results);
   return {
     source: "Transitous (open transit data, backup for DB)",
     from: a,
@@ -212,7 +232,7 @@ async function trainsViaTransitous(from, to, when, arriveBy, results) {
       legs: it.legs
         .filter((l) => l.mode !== "WALK" || l.distance > 300)
         .map((l) => ({
-          line: l.mode === "WALK" ? "walk" : l.routeShortName || l.mode,
+          line: l.mode === "WALK" ? "walk" : motisLine(l),
           product: l.mode,
           from: l.from?.name,
           to: l.to?.name,
@@ -257,6 +277,22 @@ async function walk(a, b) {
 }
 
 async function localTransit(a, b, when) {
+  try {
+    const r = await localTransitDb(a, b, when);
+    if (r) return r;
+  } catch {}
+  const data = await transitousPlan(a, b, when, false, 1);
+  const it = data.itineraries?.[0];
+  if (!it) return null;
+  return {
+    minutes: Math.round(it.duration / 60),
+    departureLocal: hhmm(it.startTime),
+    arrivalLocal: hhmm(it.endTime),
+    lines: it.legs.filter((l) => l.mode !== "WALK").map(motisLine),
+  };
+}
+
+async function localTransitDb(a, b, when) {
   const q = new URLSearchParams({
     "from.latitude": a.lat, "from.longitude": a.lon, "from.address": a.name || "start",
     "to.latitude": b.lat, "to.longitude": b.lon, "to.address": b.name || "end",

@@ -12,7 +12,7 @@ async function step(name, fn) {
   try {
     const r = await fn();
     console.log(`\n✓ ${name} (${Math.round(performance.now() - t)} ms)`);
-    console.log(JSON.stringify(r, (k, v) => (k === "geometry" ? `[${v.length} points]` : v), 2).slice(0, 1500));
+    console.log(JSON.stringify(r, (k, v) => (k === "geometry" ? `[${v.length} points]` : v), 2).slice(0, 4000));
     return r;
   } catch (e) {
     console.log(`\n✗ ${name} (${Math.round(performance.now() - t)} ms): ${e.message}`);

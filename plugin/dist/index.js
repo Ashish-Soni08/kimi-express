@@ -3,24 +3,46 @@
 // data lookups (DB trains, OpenStreetMap, routing) and shows every result live on the dashboard.
 import { Type } from "typebox";
 import { defineToolPlugin, openRecord } from "openclaw/plugin-sdk/tool-plugin";
-async function call(config, name, args, signal) {
+async function call(config, name, args, ctx, signal) {
     const base = (config.baseUrl || process.env.KIMI_EXPRESS_URL || "http://127.0.0.1:5177").replace(/\/$/, "");
     let res;
     try {
         res = await fetch(`${base}/api/tools/${name}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                // Lets the dashboard tell parallel runs apart (e.g. Cerebras vs GPU race).
+                "x-kx-session": ctx.sessionKey ?? "",
+                "x-kx-run": ctx.runId ?? "",
+                "x-kx-model": ctx.activeModel?.modelRef ?? [ctx.activeModel?.provider, ctx.activeModel?.modelId].filter(Boolean).join("/"),
+            },
             body: JSON.stringify(args ?? {}),
             signal,
         });
     }
-    catch (e) {
+    catch {
         return { error: `Kimi Express dashboard is not reachable at ${base}. Start it with "npm start" in the kimi-express folder.` };
     }
     const data = (await res.json().catch(() => ({})));
     if (!res.ok)
         return { error: String(data.error ?? `HTTP ${res.status}`) };
     return data;
+}
+// Builds a runtime tool bound to the current session, so results can be routed to the right dashboard lane.
+function bound(name, label, description, parameters) {
+    return ({ config, toolContext }) => ({
+        name,
+        label,
+        description,
+        parameters,
+        async execute(_toolCallId, params, signal) {
+            const result = await call(config, name, params, toolContext, signal);
+            return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        },
+    });
+}
+function mk(tool, def) {
+    return tool({ ...def, workspaceAccess: false, factory: bound(def.name, def.label, def.description, def.parameters) });
 }
 const Point = Type.Object({
     name: Type.String({ description: "Place or station name." }),
@@ -42,7 +64,7 @@ export default defineToolPlugin({
         baseUrl: Type.Optional(Type.String({ description: "Kimi Express dashboard URL, default http://127.0.0.1:5177" })),
     }),
     tools: (tool) => [
-        tool({
+        mk(tool, {
             name: "find_places",
             label: "Find places",
             description: "Geocode the places the user wants to visit in a city (OpenStreetMap). Set discover=true to also get the top sights near the city centre.",
@@ -53,10 +75,8 @@ export default defineToolPlugin({
                 kinds: Type.Optional(Type.Array(Type.String(), { description: "OSM tourism kinds for discovery: attraction, museum, viewpoint, gallery, zoo, theme_park." })),
                 limit: Type.Optional(Type.Number({ description: "Max suggestions (default 8)." })),
             }),
-            workspaceAccess: false,
-            execute: (args, config, ctx) => call(config, "find_places", args, ctx?.signal),
         }),
-        tool({
+        mk(tool, {
             name: "search_trains",
             label: "Search trains",
             description: "Real Deutsche Bahn connections between two stations (falls back to Transitous). Returns departure/arrival times, duration, changes and lines.",
@@ -67,10 +87,8 @@ export default defineToolPlugin({
                 arriveBy: Type.Optional(Type.Boolean({ description: "true = 'when' is the latest arrival time." })),
                 results: Type.Optional(Type.Number({ description: "Number of options, 1-6 (default 4)." })),
             }),
-            workspaceAccess: false,
-            execute: (args, config, ctx) => call(config, "search_trains", args, ctx?.signal),
         }),
-        tool({
+        mk(tool, {
             name: "travel_between",
             label: "Travel between stops",
             description: "Walking distance/time between consecutive stops, plus local public transport time when the walk is over 20 minutes. Send all legs of the day in one call.",
@@ -78,10 +96,8 @@ export default defineToolPlugin({
                 legs: Type.Array(Type.Object({ from: Point, to: Point }), { description: "Ordered legs, e.g. station->stop1, stop1->stop2, ..., last stop->station." }),
                 when: Type.Optional(Type.String({ description: "ISO date-time of the first leg, for transit lookups." })),
             }),
-            workspaceAccess: false,
-            execute: (args, config, ctx) => call(config, "travel_between", args, ctx?.signal),
         }),
-        tool({
+        mk(tool, {
             name: "publish_plan",
             label: "Publish plan",
             description: "Show the final day plan on the Kimi Express dashboard. Call this once, as the last tool call of a trip plan.",
@@ -114,10 +130,8 @@ export default defineToolPlugin({
                     summary: Type.Optional(Type.String()),
                 }, { additionalProperties: true }),
             }),
-            workspaceAccess: false,
-            execute: (args, config, ctx) => call(config, "publish_plan", args, ctx?.signal),
         }),
-        tool({
+        mk(tool, {
             name: "save_trip",
             label: "Save trip",
             description: "Save a trip plan to the user's trip log. Use status 'done' for trips already taken.",
@@ -126,10 +140,8 @@ export default defineToolPlugin({
                 status: Type.Optional(Type.String({ description: "planned or done" })),
                 notes: Type.Optional(Type.String()),
             }),
-            workspaceAccess: false,
-            execute: (args, config, ctx) => call(config, "save_trip", args, ctx?.signal),
         }),
-        tool({
+        mk(tool, {
             name: "list_trips",
             label: "List trips",
             description: "List trips from the user's trip log, optionally filtered by destination city.",
@@ -137,8 +149,6 @@ export default defineToolPlugin({
                 city: Type.Optional(Type.String()),
                 limit: Type.Optional(Type.Number()),
             }),
-            workspaceAccess: false,
-            execute: (args, config, ctx) => call(config, "list_trips", args, ctx?.signal),
         }),
     ],
 });

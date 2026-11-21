@@ -215,12 +215,16 @@ function connectEvents() {
   const es = new EventSource("/api/events");
   es.onmessage = (m) => {
     const e = JSON.parse(m.data);
-    if (e.type === "tool_start") feedAdd(e.id, "run", `<span class="t">${LABEL[e.name] || e.name}</span><span class="ms">…</span><div class="sub">${esc(argSummary(e.name, e.args))}</div>`);
+    const gpu = e.lane === "gpu";
+    const tag = gpu ? `<span class="lane-tag">${esc(gpuInfo?.label || "GPU")}</span>` : "";
+    if (gpu && e.type?.startsWith("tool")) raceTool("gpu");
+    if (!gpu && e.type?.startsWith("tool") && racing) raceTool("cerebras");
+    if (e.type === "tool_start") feedAdd(e.id, "run" + (gpu ? " gpu" : ""), `${tag}<span class="t">${LABEL[e.name] || e.name}</span><span class="ms">…</span><div class="sub">${esc(argSummary(e.name, e.args))}</div>`);
     if (e.type === "tool_end" || e.type === "tool_error") {
       const li = feedItems.get(e.id) || feedAdd(e.id, "", "");
-      li.className = e.type === "tool_end" ? "ok" : "err";
-      li.innerHTML = `<span class="t">${LABEL[e.name] || e.name}</span><span class="ms">${e.ms} ms</span><div class="sub">${esc(argSummary(e.name, e.args))}</div><div class="sub">${e.type === "tool_end" ? resultSummary(e.name, e.result) : "⚠️ " + esc(e.error)}</div>`;
-      if (e.type === "tool_end") onToolResult(e.name, e.args, e.result);
+      li.className = (e.type === "tool_end" ? "ok" : "err") + (gpu ? " gpu" : "");
+      li.innerHTML = `${tag}<span class="t">${LABEL[e.name] || e.name}</span><span class="ms">${e.ms} ms</span><div class="sub">${esc(argSummary(e.name, e.args))}</div><div class="sub">${e.type === "tool_end" ? resultSummary(e.name, e.result) : "⚠️ " + esc(e.error)}</div>`;
+      if (e.type === "tool_end" && !gpu) onToolResult(e.name, e.args, e.result);
     }
     if (e.type === "trips_changed") loadTrips();
   };
@@ -229,16 +233,12 @@ function connectEvents() {
 
 // ---------- ask ----------
 const conversation = Math.random().toString(36).slice(2);
-async function ask(prompt) {
-  $("#go").disabled = true;
-  feedClear();
-  feedAdd("k", "run", `<span class="t">🧠 Kimi K3.1 Pro</span><span class="ms">thinking</span><div class="sub">via OpenClaw → Cerebras</div>`);
-  $("#answer").textContent = "";
-  $("#answer").classList.remove("muted");
-  $("#answer").classList.add("streaming");
-  startTimer();
+let gpuInfo = null;
+let racing = false;
+
+async function streamPlan(prompt, lane, { onDelta, onMetrics, onError }) {
   try {
-    const res = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, conversation }) });
+    const res = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, conversation, lane }) });
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
@@ -251,19 +251,83 @@ async function ask(prompt) {
         const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
         if (!chunk.startsWith("data:")) continue;
         const e = JSON.parse(chunk.slice(5));
-        if (e.type === "delta") $("#answer").textContent += e.text;
-        if (e.type === "metrics") showMetrics(e);
-        if (e.type === "error") { $("#answer").textContent += `\n⚠️ ${e.error}`; stopTimer(); }
+        if (e.type === "delta") onDelta?.(e.text);
+        if (e.type === "metrics") onMetrics?.(e);
+        if (e.type === "error") onError?.(e.error);
       }
     }
   } catch (err) {
-    $("#answer").textContent += `\n⚠️ ${err.message}`;
-    stopTimer();
-  } finally {
-    const k = feedItems.get("k"); if (k) { k.className = "ok"; k.querySelector(".ms").textContent = "done"; }
-    $("#answer").classList.remove("streaming");
-    $("#go").disabled = false;
+    onError?.(err.message);
   }
+}
+
+// ---------- race: Cerebras vs GPU ----------
+const race = {};
+let raceTimer = null;
+function raceStart() {
+  const box = $("#race");
+  box.classList.remove("hidden");
+  const t = performance.now();
+  for (const lane of ["cerebras", "gpu"]) race[lane] = { t, done: null, tools: 0, tps: null };
+  box.innerHTML = ["cerebras", "gpu"].map((lane) => `
+    <div class="lane ${lane}" id="lane-${lane}">
+      <div class="lane-head"><b>${lane === "cerebras" ? "Kimi K3.1 Pro · Cerebras" : esc(gpuInfo?.label || "GPU")}</b><span class="lane-time" id="lt-${lane}">0.0 s</span></div>
+      <div class="bar"><div class="fill" id="lb-${lane}"></div></div>
+      <div class="lane-sub" id="ls-${lane}">working…</div>
+    </div>`).join("");
+  clearInterval(raceTimer);
+  raceTimer = setInterval(() => {
+    const now = performance.now();
+    const max = Math.max(...Object.values(race).map((r) => ((r.done ?? now) - r.t) / 1000), 1);
+    for (const lane of ["cerebras", "gpu"]) {
+      const r = race[lane];
+      const sec = ((r.done ?? now) - r.t) / 1000;
+      $("#lt-" + lane).textContent = sec.toFixed(1) + " s";
+      $("#lb-" + lane).style.width = Math.min(100, (sec / max) * 100) + "%";
+    }
+    if (Object.values(race).every((r) => r.done)) clearInterval(raceTimer);
+  }, 50);
+}
+function raceTool(lane) { if (race[lane] && !race[lane].done) { race[lane].tools++; $("#ls-" + lane).textContent = `working… ${race[lane].tools} tool events`; } }
+function raceDone(lane, m, err) {
+  const r = race[lane];
+  if (!r || r.done) return;
+  r.done = performance.now();
+  const el = $("#lane-" + lane);
+  el.classList.add("done");
+  $("#ls-" + lane).textContent = err ? `⚠️ ${err}` : `plan ready · ${m?.tokensPerSecond?.toLocaleString() ?? "—"} tok/s · ${m?.toolCalls ?? 0} tool calls`;
+  const other = race[lane === "cerebras" ? "gpu" : "cerebras"];
+  if (other?.done && !err) {
+    const c = race.cerebras, g = race.gpu;
+    const ct = c.done - c.t, gt = g.done - g.t;
+    const x = gt / ct;
+    $("#race").insertAdjacentHTML("beforeend", `<div class="verdict">${x >= 1 ? `Cerebras finished <b>${x.toFixed(1)}× faster</b>` : `GPU finished first this time`}</div>`);
+  }
+}
+
+async function ask(prompt) {
+  $("#go").disabled = true;
+  racing = !!(gpuInfo && $("#race-on")?.checked);
+  feedClear();
+  feedAdd("k", "run", `<span class="t">🧠 Kimi K3.1 Pro</span><span class="ms">thinking</span><div class="sub">via OpenClaw → Cerebras</div>`);
+  $("#answer").textContent = "";
+  $("#answer").classList.remove("muted");
+  $("#answer").classList.add("streaming");
+  startTimer();
+  if (racing) raceStart(); else $("#race").classList.add("hidden");
+  const main = streamPlan(prompt, "cerebras", {
+    onDelta: (t) => ($("#answer").textContent += t),
+    onMetrics: (m) => { showMetrics(m); if (racing) raceDone("cerebras", m); },
+    onError: (e) => { $("#answer").textContent += `\n⚠️ ${e}`; stopTimer(); if (racing) raceDone("cerebras", null, e); },
+  });
+  const gpu = racing
+    ? streamPlan(prompt, "gpu", { onMetrics: (m) => raceDone("gpu", m), onError: (e) => raceDone("gpu", null, e) })
+    : Promise.resolve();
+  await main;
+  const k = feedItems.get("k"); if (k) { k.className = "ok"; k.querySelector(".ms").textContent = "done"; }
+  $("#answer").classList.remove("streaming");
+  await gpu;
+  $("#go").disabled = false;
 }
 $("#ask").onsubmit = (e) => { e.preventDefault(); const p = $("#prompt").value.trim(); if (p) ask(p); };
 $("#prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("#ask").requestSubmit(); });
@@ -273,6 +337,13 @@ fetch("/api/health").then((r) => r.json()).then((h) => {
   const p = $("#pill-gateway");
   p.textContent = h.gateway === "ok" ? "Gateway connected" : `Gateway ${h.gateway}`;
   p.classList.add(h.gateway === "ok" ? "ok" : "err");
+  if (h.gpu) {
+    gpuInfo = h.gpu;
+    $("#go").insertAdjacentHTML("beforebegin", `<label class="race-toggle"><input type="checkbox" id="race-on" /> Race vs ${esc(h.gpu.label)}</label>`);
+    const cb = $("#race-on");
+    cb.checked = store.get("kx-race", "0") === "1";
+    cb.onchange = () => store.set("kx-race", cb.checked ? "1" : "0");
+  }
 }).catch(() => {});
 connectEvents();
 loadTrips();

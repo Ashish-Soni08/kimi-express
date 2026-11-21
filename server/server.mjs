@@ -14,11 +14,14 @@ const HOST = process.env.KX_HOST || "127.0.0.1";
 const GATEWAY = (process.env.OPENCLAW_GATEWAY_URL || "http://127.0.0.1:18789").replace(/\/$/, "");
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_PASSWORD || "";
 const AGENT = process.env.KX_AGENT || "openclaw/default";
+// Optional GPU-hosted Kimi for the side-by-side race (any OpenClaw model ref). Cerebras stays the default lane.
+const GPU_MODEL = process.env.KX_GPU_MODEL || "";
+const GPU_LABEL = process.env.KX_GPU_LABEL || "GPU (Nebius)";
 const WEB = fileURLToPath(new URL("../web/", import.meta.url));
 
 // ---------- dashboard event bus (SSE) ----------
 const clients = new Set();
-let run = null; // the plan currently being generated
+const runs = new Map(); // lane -> run currently being generated
 function broadcast(evt) {
   const line = `data: ${JSON.stringify(evt)}\n\n`;
   for (const res of clients) res.write(line);
@@ -36,35 +39,46 @@ async function body(req) {
 }
 
 // ---------- tool endpoint (called by the OpenClaw plugin) ----------
-async function runTool(name, args) {
+function laneFor(req) {
+  const key = String(req.headers["x-kx-session"] || "");
+  const m = key.match(/kx-(cerebras|gpu)-/);
+  if (m) return m[1];
+  return runs.size === 1 ? [...runs.keys()][0] : "cerebras";
+}
+
+async function runTool(name, args, lane = "cerebras") {
   const fn = TOOLS[name];
   if (!fn) throw Object.assign(new Error(`Unknown tool ${name}`), { code: 404 });
+  const run = runs.get(lane);
   const id = Math.random().toString(36).slice(2, 9);
   const t0 = performance.now();
-  broadcast({ type: "tool_start", id, name, args });
+  broadcast({ type: "tool_start", id, name, args, lane });
   try {
     const result = await fn(args || {});
     const ms = Math.round(performance.now() - t0);
     if (run) run.toolMs += ms, run.toolCalls++;
-    broadcast({ type: "tool_end", id, name, args, result, ms });
+    broadcast({ type: "tool_end", id, name, args, result, ms, lane });
     return result;
   } catch (e) {
     const ms = Math.round(performance.now() - t0);
     if (run) run.toolMs += ms, run.toolCalls++;
-    broadcast({ type: "tool_error", id, name, args, error: String(e.message || e), ms });
+    broadcast({ type: "tool_error", id, name, args, error: String(e.message || e), ms, lane });
     throw e;
   }
 }
 
 // ---------- plan endpoint: user prompt -> OpenClaw Gateway -> Kimi on Cerebras ----------
 async function plan(req, res) {
-  const { prompt, conversation } = await body(req);
+  const { prompt, conversation, lane: laneIn } = await body(req);
+  const lane = laneIn === "gpu" && GPU_MODEL ? "gpu" : "cerebras";
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
   const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Berlin", weekday: "long", year: "numeric", month: "2-digit", day: "2-digit" });
-  const me = (run = { t0: performance.now(), toolMs: 0, toolCalls: 0, firstTokenMs: null, chars: 0 });
-  broadcast({ type: "run_start", prompt });
+  const me = { t0: performance.now(), toolMs: 0, toolCalls: 0, firstTokenMs: null };
+  runs.set(lane, me);
+  const sessionKey = `kx-${lane}-${conversation || "x"}-${Date.now().toString(36)}`;
+  broadcast({ type: "run_start", prompt, lane });
 
   const ctrl = new AbortController();
   res.on("close", () => { if (!res.writableEnded) ctrl.abort(); });
@@ -78,12 +92,13 @@ async function plan(req, res) {
       headers: {
         "Content-Type": "application/json",
         ...(GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}),
+        "x-openclaw-session-key": sessionKey,
+        ...(lane === "gpu" ? { "x-openclaw-model": GPU_MODEL } : {}),
       },
       body: JSON.stringify({
         model: AGENT,
         stream: true,
         stream_options: { include_usage: true },
-        user: conversation ? `kimi-express:${conversation}` : undefined,
         messages: [
           { role: "system", content: SYSTEM_PROMPT.replace("{{TODAY}}", today) },
           { role: "user", content: prompt },
@@ -125,6 +140,7 @@ async function plan(req, res) {
     const modelMs = Math.max(1, totalMs - me.toolMs);
     const metrics = {
       type: "metrics",
+      lane,
       totalMs: Math.round(totalMs),
       toolMs: me.toolMs,
       modelMs: Math.round(modelMs),
@@ -142,7 +158,7 @@ async function plan(req, res) {
   } catch (e) {
     if (e.name !== "AbortError") send({ type: "error", error: String(e.message || e) });
   } finally {
-    if (run === me) run = null;
+    if (runs.get(lane) === me) runs.delete(lane);
     res.end();
   }
 }
@@ -176,7 +192,7 @@ createServer(async (req, res) => {
     if (url.pathname.startsWith("/api/tools/") && req.method === "POST") {
       const name = url.pathname.slice("/api/tools/".length);
       try {
-        return json(res, 200, await runTool(name, await body(req)));
+        return json(res, 200, await runTool(name, await body(req), laneFor(req)));
       } catch (e) {
         return json(res, e.code || 502, { error: String(e.message || e) });
       }
@@ -200,7 +216,7 @@ createServer(async (req, res) => {
         const r = await fetch(`${GATEWAY}/v1/models`, { headers: GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}, signal: AbortSignal.timeout(3000) });
         gateway = r.ok ? "ok" : `HTTP ${r.status}`;
       } catch {}
-      return json(res, 200, { ok: true, gateway, agent: AGENT, tokenSet: !!GATEWAY_TOKEN });
+      return json(res, 200, { ok: true, gateway, agent: AGENT, tokenSet: !!GATEWAY_TOKEN, gpu: GPU_MODEL ? { model: GPU_MODEL, label: GPU_LABEL } : null });
     }
     return serveStatic(req, res);
   } catch (e) {
@@ -209,4 +225,5 @@ createServer(async (req, res) => {
 }).listen(PORT, HOST, () => {
   console.log(`Kimi Express dashboard: http://${HOST}:${PORT}`);
   console.log(`OpenClaw Gateway: ${GATEWAY} (agent ${AGENT}, token ${GATEWAY_TOKEN ? "set" : "NOT set"})`);
+  console.log(GPU_MODEL ? `Race mode: Cerebras vs ${GPU_LABEL} (${GPU_MODEL})` : "Race mode off (set KX_GPU_MODEL to enable)");
 });

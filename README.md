@@ -10,6 +10,7 @@ Built for the Cerebras × Kimi K3.1 Pro × OpenClaw hackathon. `#KimiOnCerebras`
 
 - **Where to?** One sentence, e.g. *"Day trip to Berlin tomorrow from Hannover. Museum Island and East Side Gallery, back by 21:00."*
 - **Speed panel:** tokens/sec, time to first token and total time to a full plan, with model time and tool time split out.
+- **Race vs GPU (optional):** the same request runs on Kimi K3.1 Pro on Cerebras and on a GPU-hosted Kimi at the same time, through the same OpenClaw agent and tools, with live progress bars and a "Cerebras finished N× faster" verdict.
 - **Agent activity:** every tool call Kimi makes through OpenClaw, live, with its latency and result.
 - **Map:** your stops, numbered in visiting order, with walking routes and transit hops.
 - **Today's plan:** outbound and return trains, a timeline of stops with times, totals (time on trains, getting around, km walked) and tips.
@@ -79,6 +80,8 @@ The pill in the top right turns green when the dashboard can reach the gateway.
 | `OPENCLAW_GATEWAY_TOKEN` | none (set if the gateway uses token/password auth) |
 | `KX_AGENT` | `openclaw/default` |
 | `KX_PORT` | `5177` |
+| `KX_GPU_MODEL` | none. Set to a GPU-hosted Kimi, e.g. `nebius/moonshotai/Kimi-K3.1-Pro`, to show the **Race vs GPU** toggle |
+| `KX_GPU_LABEL` | `GPU (Nebius)` |
 
 ### Rebuilding the plugin
 

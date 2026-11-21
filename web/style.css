@@ -134,6 +134,22 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .log .actions { margin-top: 6px; display: flex; gap: 6px; }
 .log .actions button { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 6px; font-size: 11px; padding: 2px 8px; cursor: pointer; }
 
+/* race */
+.race-toggle { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.race-toggle input { accent-color: var(--accent); }
+.race { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
+.lane-head { display: flex; justify-content: space-between; font-size: 12px; }
+.lane-time { font: 700 13px var(--mono); }
+.bar { height: 8px; background: var(--panel-2); border-radius: 99px; overflow: hidden; margin: 5px 0 3px; }
+.fill { height: 100%; width: 0; border-radius: 99px; background: var(--accent); transition: width .05s linear; }
+.lane.gpu .fill { background: #6b7385; }
+.lane.done.cerebras .lane-time { color: var(--accent-2); }
+.lane-sub { font-size: 11px; color: var(--muted); }
+.verdict { text-align: center; font-size: 13px; padding: 6px; background: #f05a2818; border-radius: 8px; }
+.verdict b { color: var(--accent-2); }
+#feed li.gpu { opacity: .55; }
+.lane-tag { font-size: 10px; background: #6b738544; color: var(--muted); border-radius: 4px; padding: 0 5px; margin-right: 6px; }
+
 @media (max-width: 1100px) {
   .grid { grid-template-columns: 1fr; height: auto; }
   .center .mapcard { height: 420px; flex: none; }

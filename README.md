@@ -40,7 +40,7 @@ Kimi Express server (Node, :5177) ──► OpenClaw Gateway (:18789, /v1/chat/c
 | Places / sights | OpenStreetMap via [Photon](https://photon.komoot.io) (backup: [Nominatim](https://nominatim.org)) + [Overpass](https://overpass-api.de) for sight ideas |
 | Walking routes | [FOSSGIS OSRM](https://routing.openstreetmap.de) foot router |
 | Local transit between stops | Transitous (S-Bahn, U-Bahn, tram, bus) |
-| Map tiles | © OpenStreetMap contributors, © CARTO |
+| Map tiles | Standard [OpenStreetMap](https://www.openstreetmap.org/copyright) tiles (keyless, light use only), darkened in CSS |
 
 No ticket prices or booking: DB doesn't offer those without a partner contract.
 

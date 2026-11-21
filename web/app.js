@@ -47,10 +47,12 @@ renderChips();
 
 // ---------- map ----------
 const map = L.map("map", { zoomControl: true }).setView([51.2, 10.4], 6);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+// Standard OpenStreetMap tiles (keyless), darkened with a CSS filter on the tile pane only.
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   maxZoom: 19,
 }).addTo(map);
+let routeLayer = L.layerGroup().addTo(map);
 let layers = L.layerGroup().addTo(map);
 let suggLayer = L.layerGroup().addTo(map);
 const icon = (html, cls = "") => L.divIcon({ className: "", html: `<div class="num-marker ${cls}">${html}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
@@ -148,7 +150,7 @@ function onToolResult(name, args, r) {
     for (const leg of r.legs || []) {
       L.polyline(leg.geometry, { color: leg.recommended === "transit" ? "#5b8cff" : "#f05a28", weight: 4, opacity: 0.85, dashArray: leg.recommended === "transit" ? "6 6" : null })
         .bindTooltip(`${esc(leg.from)} → ${esc(leg.to)}: ${leg.minutes} min (${leg.recommended})`)
-        .addTo(layers);
+        .addTo(routeLayer);
     }
   }
   if (name === "publish_plan") renderPlan(args.plan);
@@ -167,6 +169,7 @@ function renderPlan(plan) {
   if (!plan) return;
   currentPlan = plan;
   showTab("plan");
+  if (plan.origin) homeInput.value = plan.origin; // show where this trip starts (not saved as home)
   const tot = plan.totals || {};
   const legs = plan.legs || [];
   let tl = "";
@@ -195,7 +198,7 @@ function renderPlan(plan) {
   layers.clearLayers();
   const pts = (plan.stops || []).filter((s) => isFinite(s.lat));
   pts.forEach((s, i) => L.marker([s.lat, s.lon], { icon: icon(i + 1) }).bindTooltip(`${i + 1}. ${esc(s.name)} ${esc(s.arrive || "")}`).addTo(layers));
-  if (pts.length > 1) L.polyline(pts.map((s) => [s.lat, s.lon]), { color: "#f05a28", weight: 3, opacity: 0.6, dashArray: "2 8" }).addTo(layers);
+  if (pts.length > 1 && !routeLayer.getLayers().length) L.polyline(pts.map((s) => [s.lat, s.lon]), { color: "#f05a28", weight: 3, opacity: 0.6, dashArray: "2 8" }).addTo(layers);
   fit(pts.map((s) => [s.lat, s.lon]));
 }
 async function saveCurrent() {
@@ -241,6 +244,7 @@ function connectEvents() {
     const tag = gpu ? `<span class="lane-tag">${esc(gpuInfo?.label || "GPU")}</span>` : "";
     if (gpu && e.type?.startsWith("tool")) raceTool("gpu");
     if (!gpu && e.type?.startsWith("tool") && racing) raceTool("cerebras");
+    if (e.type === "tool_start") gatewayPill("ok");
     if (e.type === "tool_start" && !gpu && $("#status").classList.contains("busy")) status(STEP[e.name] || "Working…", "busy");
     if (e.type === "tool_end" && !gpu && e.name !== "publish_plan" && $("#status").classList.contains("busy")) setTimeout(() => $("#status").classList.contains("busy") && status("Kimi is thinking…", "busy"), 600);
     if (e.type === "tool_start") feedAdd(e.id, "run" + (gpu ? " gpu" : ""), `${tag}<span class="t">${LABEL[e.name] || e.name}</span><span class="ms">…</span><div class="sub">${esc(argSummary(e.name, e.args))}</div>`);
@@ -349,6 +353,7 @@ async function ask(prompt) {
   $("#go").disabled = true;
   racing = !!(gpuInfo && $("#race-on")?.checked);
   feedClear();
+  routeLayer.clearLayers();
   feedAdd("k", "run", `<span class="t">🧠 Kimi K3.1 Pro</span><span class="ms">thinking</span><div class="sub">via OpenClaw → Cerebras</div>`);
   $("#answer").textContent = "";
   $("#answer").classList.remove("muted");
@@ -378,10 +383,20 @@ $("#ask").onsubmit = (e) => { e.preventDefault(); const p = $("#prompt").value.t
 $("#prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#ask").requestSubmit(); } });
 
 // ---------- boot ----------
-fetch("/api/health").then((r) => r.json()).then((h) => {
+function gatewayPill(state) {
   const p = $("#pill-gateway");
-  p.textContent = h.gateway === "ok" ? "Gateway connected" : `Gateway ${h.gateway}`;
-  p.classList.add(h.gateway === "ok" ? "ok" : "err");
+  const ok = state === "ok" || state === "busy";
+  p.textContent = state === "ok" ? "Gateway connected" : state === "busy" ? "Gateway busy" : `Gateway ${state}`;
+  p.classList.toggle("ok", ok);
+  p.classList.toggle("err", !ok);
+}
+function checkGateway() {
+  if (document.body.dataset.state === "running") return; // a run in progress already proves the gateway is up
+  fetch("/api/health").then((r) => r.json()).then((h) => gatewayPill(h.gateway)).catch(() => gatewayPill("unreachable"));
+}
+setInterval(checkGateway, 30000);
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  gatewayPill(h.gateway);
   if (h.gpu && SHOW_SPEED) {
     gpuInfo = h.gpu;
     $("#go").insertAdjacentHTML("beforebegin", `<label class="race-toggle"><input type="checkbox" id="race-on" data-testid="race-toggle" /> Race vs ${esc(h.gpu.label)}</label>`);

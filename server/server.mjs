@@ -252,9 +252,12 @@ createServer(async (req, res) => {
     if (url.pathname === "/api/health") {
       let gateway = "unreachable";
       try {
-        const r = await fetch(`${GATEWAY}/v1/models`, { headers: GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}, signal: AbortSignal.timeout(3000) });
+        const r = await fetch(`${GATEWAY}/v1/models`, { headers: GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}, signal: AbortSignal.timeout(10000) });
         gateway = r.ok ? "ok" : `HTTP ${r.status}`;
-      } catch {}
+      } catch (e) {
+        // A timeout means the gateway accepted the connection but is busy (e.g. mid agent run); refused means it's down.
+        if (e?.name === "TimeoutError") gateway = "busy";
+      }
       return json(res, 200, { ok: true, gateway, agent: AGENT, tokenSet: !!GATEWAY_TOKEN, gpu: GPU_MODEL ? { model: GPU_MODEL, label: GPU_LABEL } : null });
     }
     return serveStatic(req, res);

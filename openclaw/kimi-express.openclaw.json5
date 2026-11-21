@@ -4,7 +4,7 @@
   agents: {
     defaults: {
       model: {
-        primary: "cerebras/moonshotai-kimi-k3.1-pro-test",
+        primary: "cerebras/moonshotai-kimi-k3.1-pro-trial",
         fallbacks: [], // Kimi on Cerebras is the whole point: no silent fallback
       },
     },
@@ -17,7 +17,7 @@
         apiKey: "${CEREBRAS_API_KEY}",
         api: "openai-completions",
         models: [
-          { id: "moonshotai-kimi-k3.1-pro-test", name: "Kimi K3.1 Pro (test)", reasoning: true, input: ["text"], maxTokens: 40960 },
+          { id: "moonshotai-kimi-k3.1-pro-trial", name: "Kimi K3.1 Pro (trial)", reasoning: true, input: ["text"], maxTokens: 40960 },
         ],
       },
     },

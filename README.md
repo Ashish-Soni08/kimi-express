@@ -28,7 +28,7 @@ Kimi Express server (Node, :5177) ──► OpenClaw Gateway (:18789, /v1/chat/c
    └──────── kimi-express-tools plugin ◄── Kimi K3.1 Pro on Cerebras
 ```
 
-- The **OpenClaw agent** runs on `cerebras/moonshotai-kimi-k3.1-pro-test`.
+- The **OpenClaw agent** runs on `cerebras/moonshotai-kimi-k3.1-pro-trial`.
 - The **kimi-express-tools** OpenClaw plugin gives the agent 6 tools: `find_places`, `search_trains`, `travel_between`, `publish_plan`, `save_trip`, `list_trips`.
 - The plugin forwards each call to the local Kimi Express server, which runs the lookup and streams the result to the dashboard as it happens.
 

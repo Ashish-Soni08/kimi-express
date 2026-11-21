@@ -91,6 +91,18 @@ npm install
 npm run plugin:validate
 ```
 
+## Automation hooks (for recording demos)
+
+| Selector | Meaning |
+| --- | --- |
+| `[data-testid="trip-prompt"]` | Prompt box. Enter submits, Shift+Enter adds a new line |
+| `[data-testid="plan-button"]` | Submit button |
+| `[data-testid="race-toggle"]` | "Race vs GPU" checkbox (only when `KX_GPU_MODEL` is set; remembered per browser) |
+| `[data-plan-ready]` / `[data-testid="plan-complete"]` | Hidden marker added once the Cerebras plan is fully rendered (trains, map, timeline, metrics) |
+| `[data-testid="race-complete"]` | Hidden marker added once both race lanes finished |
+| `[data-testid="race-verdict"]` | "Cerebras finished N× faster" text |
+| `body[data-state]` | `idle`, `running`, `done` or `error` |
+
 ## Repo layout
 
 ```

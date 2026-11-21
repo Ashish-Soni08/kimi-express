@@ -301,11 +301,27 @@ function raceDone(lane, m, err) {
     const c = race.cerebras, g = race.gpu;
     const ct = c.done - c.t, gt = g.done - g.t;
     const x = gt / ct;
-    $("#race").insertAdjacentHTML("beforeend", `<div class="verdict">${x >= 1 ? `Cerebras finished <b>${x.toFixed(1)}× faster</b>` : `GPU finished first this time`}</div>`);
+    $("#race").insertAdjacentHTML("beforeend", `<div class="verdict" data-testid="race-verdict">${x >= 1 ? `Cerebras finished <b>${x.toFixed(1)}× faster</b>` : `GPU finished first this time`}</div>`);
   }
 }
 
+// Automation hooks: body[data-state] is idle | running | done | error,
+// [data-testid="plan-complete"] appears when the Cerebras plan is finished,
+// [data-testid="race-complete"] appears when both race lanes are finished.
+function setState(st) { document.body.dataset.state = st; }
+function marker(id) {
+  if (document.querySelector(`[data-testid="${id}"]`)) return;
+  const m = document.createElement("span");
+  m.dataset.testid = id; m.hidden = true;
+  if (id === "plan-complete") m.setAttribute("data-plan-ready", "");
+  document.body.appendChild(m);
+}
+setState("idle");
+
 async function ask(prompt) {
+  document.querySelectorAll('[data-testid="plan-complete"],[data-testid="race-complete"]').forEach((e) => e.remove());
+  currentPlan = null;
+  setState("running");
   $("#go").disabled = true;
   racing = !!(gpuInfo && $("#race-on")?.checked);
   feedClear();
@@ -326,11 +342,14 @@ async function ask(prompt) {
   await main;
   const k = feedItems.get("k"); if (k) { k.className = "ok"; k.querySelector(".ms").textContent = "done"; }
   $("#answer").classList.remove("streaming");
+  if (currentPlan) marker("plan-complete"); else setState("error");
   await gpu;
+  if (racing) marker("race-complete");
+  setState(document.querySelector("#answer").textContent.includes("⚠️") ? "error" : "done");
   $("#go").disabled = false;
 }
 $("#ask").onsubmit = (e) => { e.preventDefault(); const p = $("#prompt").value.trim(); if (p) ask(p); };
-$("#prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("#ask").requestSubmit(); });
+$("#prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#ask").requestSubmit(); } });
 
 // ---------- boot ----------
 fetch("/api/health").then((r) => r.json()).then((h) => {
@@ -339,7 +358,7 @@ fetch("/api/health").then((r) => r.json()).then((h) => {
   p.classList.add(h.gateway === "ok" ? "ok" : "err");
   if (h.gpu) {
     gpuInfo = h.gpu;
-    $("#go").insertAdjacentHTML("beforebegin", `<label class="race-toggle"><input type="checkbox" id="race-on" /> Race vs ${esc(h.gpu.label)}</label>`);
+    $("#go").insertAdjacentHTML("beforebegin", `<label class="race-toggle"><input type="checkbox" id="race-on" data-testid="race-toggle" /> Race vs ${esc(h.gpu.label)}</label>`);
     const cb = $("#race-on");
     cb.checked = store.get("kx-race", "0") === "1";
     cb.onchange = () => store.set("kx-race", cb.checked ? "1" : "0");

@@ -30,12 +30,12 @@
     <section class="col left">
       <form id="ask" class="card ask">
         <label for="prompt">Where to?</label>
-        <textarea id="prompt" rows="4" placeholder="Day trip to Berlin tomorrow from Hannover. I want to see Museum Island and the East Side Gallery, back home by 21:00."></textarea>
+        <textarea id="prompt" data-testid="trip-prompt" rows="4" placeholder="Day trip to Berlin tomorrow from Hannover. I want to see Museum Island and the East Side Gallery, back home by 21:00."></textarea>
         <div class="chips" id="chips"></div>
-        <button type="submit" id="go">Plan my day <span class="kbd">Ctrl ↵</span></button>
+        <button type="submit" id="go" data-testid="plan-button">Plan my day <span class="kbd">↵</span></button>
       </form>
 
-      <div class="card speed" id="speed">
+      <div class="card speed" id="speed" data-testid="speed-panel">
         <div class="speed-main">
           <div class="big" id="m-tps">—</div>
           <div class="unit">tokens / sec</div>
@@ -47,7 +47,7 @@
           <div><b id="m-tokens">—</b><span>output tokens</span></div>
         </div>
         <div class="timer" id="timer"></div>
-        <div class="race hidden" id="race"></div>
+        <div class="race hidden" id="race" data-testid="race-panel"></div>
       </div>
 
       <div class="card feed">
@@ -58,7 +58,7 @@
 
     <!-- Center: map + answer -->
     <section class="col center">
-      <div class="card mapcard"><div id="map"></div></div>
+      <div class="card mapcard"><div id="map" data-testid="map"></div></div>
       <div class="card answer">
         <h2>Kimi says</h2>
         <div id="answer" class="muted">Ask for a trip to get started.</div>
@@ -73,7 +73,7 @@
       </div>
 
       <div class="card tabpane" id="tab-plan">
-        <div id="plan" class="muted">Your plan will appear here: trains, stops, times and distances.</div>
+        <div id="plan" class="muted" data-testid="plan-panel">Your plan will appear here: trains, stops, times and distances.</div>
       </div>
 
       <div class="card tabpane hidden" id="tab-log">

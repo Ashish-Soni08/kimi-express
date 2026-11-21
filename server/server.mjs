@@ -2,7 +2,8 @@
 // - Serves the dashboard (web/)
 // - Runs the trip tools for the OpenClaw plugin (POST /api/tools/:name) and broadcasts results to the dashboard
 // - Sends the user's request to the OpenClaw Gateway (Kimi K3.1 Pro on Cerebras) and streams the answer back with speed metrics
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,18 +54,39 @@ async function runTool(name, args, lane = "cerebras") {
   const id = Math.random().toString(36).slice(2, 9);
   const t0 = performance.now();
   broadcast({ type: "tool_start", id, name, args, lane });
+  if (run && run.firstToolMs == null) run.firstToolMs = performance.now() - run.t0;
+  console.log(`[${lane}] → ${name} ${JSON.stringify(args).slice(0, 160)}`);
   try {
     const result = await fn(args || {});
     const ms = Math.round(performance.now() - t0);
     if (run) run.toolMs += ms, run.toolCalls++;
     broadcast({ type: "tool_end", id, name, args, result, ms, lane });
+    console.log(`[${lane}] ✓ ${name} ${ms} ms`);
     return result;
   } catch (e) {
     const ms = Math.round(performance.now() - t0);
     if (run) run.toolMs += ms, run.toolCalls++;
     broadcast({ type: "tool_error", id, name, args, error: String(e.message || e), ms, lane });
+    console.log(`[${lane}] ✗ ${name} ${ms} ms: ${e.message || e}`);
     throw e;
   }
+}
+
+
+// POST with no idle/body timeout. Node's fetch (undici) aborts a response body after 300 s of
+// silence, and the gateway can stay silent for a long time while the agent works.
+function streamPost(url, headers, body, signal) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = (u.protocol === "https:" ? httpsRequest : httpRequest)(
+      u,
+      { method: "POST", headers: { ...headers, "Content-Length": Buffer.byteLength(body) }, signal },
+      (res) => resolve(res),
+    );
+    req.on("error", reject);
+    req.setTimeout(0);
+    req.end(body);
+  });
 }
 
 // ---------- plan endpoint: user prompt -> OpenClaw Gateway -> Kimi on Cerebras ----------
@@ -73,6 +95,7 @@ async function plan(req, res) {
   const lane = laneIn === "gpu" && GPU_MODEL ? "gpu" : "cerebras";
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
   const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
+  const ping = setInterval(() => res.write(": ping\n\n"), 15000);
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Berlin", weekday: "long", year: "numeric", month: "2-digit", day: "2-digit" });
   const me = { t0: performance.now(), toolMs: 0, toolCalls: 0, firstTokenMs: null };
@@ -86,16 +109,15 @@ async function plan(req, res) {
   let usage = null;
   let text = "";
   try {
-    const r = await fetch(`${GATEWAY}/v1/chat/completions`, {
-      method: "POST",
-      signal: ctrl.signal,
-      headers: {
+    const r = await streamPost(
+      `${GATEWAY}/v1/chat/completions`,
+      {
         "Content-Type": "application/json",
         ...(GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}),
         "x-openclaw-session-key": sessionKey,
         ...(lane === "gpu" ? { "x-openclaw-model": GPU_MODEL } : {}),
       },
-      body: JSON.stringify({
+      JSON.stringify({
         model: AGENT,
         stream: true,
         stream_options: { include_usage: true },
@@ -104,17 +126,16 @@ async function plan(req, res) {
           { role: "user", content: prompt },
         ],
       }),
-    });
-    if (!r.ok) {
-      const t = await r.text();
-      throw new Error(`OpenClaw Gateway answered HTTP ${r.status}: ${t.slice(0, 300)}`);
+      ctrl.signal,
+    );
+    if (r.statusCode !== 200) {
+      let t = "";
+      for await (const c of r) t += c;
+      throw new Error(`OpenClaw Gateway answered HTTP ${r.statusCode}: ${t.slice(0, 300)}`);
     }
-    const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
+    for await (const value of r) {
       buf += dec.decode(value, { stream: true });
       let i;
       while ((i = buf.indexOf("\n")) >= 0) {
@@ -146,6 +167,7 @@ async function plan(req, res) {
       modelMs: Math.round(modelMs),
       toolCalls: me.toolCalls,
       firstTokenMs: me.firstTokenMs && Math.round(me.firstTokenMs),
+      firstToolMs: me.firstToolMs && Math.round(me.firstToolMs),
       promptTokens: usage?.prompt_tokens ?? null,
       cachedTokens: usage?.prompt_tokens_details?.cached_tokens ?? null,
       completionTokens: completion,
@@ -154,11 +176,14 @@ async function plan(req, res) {
     };
     send(metrics);
     broadcast(metrics);
+    console.log(`[${lane}] done`, JSON.stringify(metrics));
     send({ type: "done", text });
   } catch (e) {
+    console.log(`[${lane}] error after ${Math.round(performance.now() - me.t0)} ms: ${e.message || e}`);
     if (e.name !== "AbortError") send({ type: "error", error: String(e.message || e) });
   } finally {
     if (runs.get(lane) === me) runs.delete(lane);
+    clearInterval(ping);
     res.end();
   }
 }

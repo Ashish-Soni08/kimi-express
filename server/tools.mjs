@@ -63,7 +63,8 @@ const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString("de-DE", { hour: "
 // ---------- find_places ----------
 async function photonOne(q, near) {
   let url = `${PHOTON}/api/?limit=1&q=${encodeURIComponent(q)}`;
-  if (near) url += `&lat=${near.lat}&lon=${near.lon}&location_bias_scale=0.5`;
+  // Keep results inside the destination city (about 25 x 25 km around its centre).
+  if (near) url += `&lat=${near.lat}&lon=${near.lon}&bbox=${near.lon - 0.18},${near.lat - 0.11},${near.lon + 0.18},${near.lat + 0.11}`;
   const r = await getJson(url, { timeoutMs: 6000 });
   const f = r.features?.[0];
   if (!f) return { query: q, found: false };

@@ -2,6 +2,19 @@
 // The Cerebras key stays in the CEREBRAS_API_KEY environment variable, never in this file.
 {
   agents: {
+    // A lean agent just for Kimi Express: only its 6 tools, no skills, no thinking.
+    // A small system prompt keeps each Kimi turn fast and well under the 100K tokens/min limit.
+    entries: {
+      "kimi-express": {
+        model: { primary: "cerebras/moonshotai-kimi-k3.1-pro-trial", fallbacks: [] },
+        thinkingDefault: "off",
+        skills: [],
+        tools: {
+          profile: "minimal",
+          alsoAllow: ["find_places", "search_trains", "travel_between", "publish_plan", "save_trip", "list_trips"],
+        },
+      },
+    },
     defaults: {
       model: {
         primary: "cerebras/moonshotai-kimi-k3.1-pro-trial",

@@ -80,7 +80,7 @@ The pill in the top right turns green when the dashboard can reach the gateway.
 | --- | --- |
 | `OPENCLAW_GATEWAY_URL` | `http://127.0.0.1:18789` |
 | `OPENCLAW_GATEWAY_TOKEN` | none (set if the gateway uses token/password auth) |
-| `KX_AGENT` | `openclaw/default` |
+| `KX_AGENT` | `openclaw/default`. Use `openclaw/kimi-express` with the lean agent from the config snippet |
 | `KX_PORT` | `5177` |
 | `KX_GPU_MODEL` | none. Set to a GPU-hosted Kimi, e.g. `nebius/moonshotai/Kimi-K3.1-Pro`, to show the **Race vs GPU** toggle |
 | `KX_GPU_LABEL` | `GPU (Nebius)` |

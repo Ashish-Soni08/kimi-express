@@ -35,10 +35,10 @@ Kimi Express server (Node, :5177) ──► OpenClaw Gateway (:18789, /v1/chat/c
 
 | What | Source |
 | --- | --- |
-| Train connections | Deutsche Bahn via [db.transport.rest](https://v6.db.transport.rest) (backup: [Transitous](https://transitous.org)) |
-| Places / sights | OpenStreetMap [Nominatim](https://nominatim.org) + [Overpass](https://overpass-api.de) |
+| Train connections | DB timetable data via [Transitous](https://transitous.org) (open, keyless). Optional: your own [db-rest](https://github.com/derhuerst/db-rest) via `KX_DB_REST` |
+| Places / sights | OpenStreetMap via [Photon](https://photon.komoot.io) (backup: [Nominatim](https://nominatim.org)) + [Overpass](https://overpass-api.de) for sight ideas |
 | Walking routes | [FOSSGIS OSRM](https://routing.openstreetmap.de) foot router |
-| Local transit between stops | db.transport.rest (includes S-Bahn, U-Bahn, tram, bus) |
+| Local transit between stops | Transitous (S-Bahn, U-Bahn, tram, bus) |
 | Map tiles | © OpenStreetMap contributors, © CARTO |
 
 No ticket prices or booking: DB doesn't offer those without a partner contract.

@@ -8,10 +8,12 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const UA = process.env.KX_USER_AGENT || "kimi-express/0.1 (hackathon day-trip planner)";
-const DB_REST = process.env.KX_DB_REST || "https://v6.db.transport.rest";
+// v6.db.transport.rest was shut down (DNS gone). Set KX_DB_REST to a self-hosted db-rest instance to use it again.
+const DB_REST = process.env.KX_DB_REST || "";
 const TRANSITOUS = process.env.KX_TRANSITOUS || "https://api.transitous.org";
+const PHOTON = process.env.KX_PHOTON || "https://photon.komoot.io";
 const NOMINATIM = process.env.KX_NOMINATIM || "https://nominatim.openstreetmap.org";
-const OVERPASS = (process.env.KX_OVERPASS || "https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter").split(",");
+const OVERPASS = (process.env.KX_OVERPASS || "https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter,https://overpass.kumi.systems/api/interpreter").split(",");
 const OSRM_FOOT = process.env.KX_OSRM_FOOT || "https://routing.openstreetmap.de/routed-foot/route/v1/foot";
 const TRIPS_FILE = process.env.KX_TRIPS_FILE || fileURLToPath(new URL("../data/trips.json", import.meta.url));
 
@@ -59,7 +61,34 @@ const mins = (a, b) => Math.round((new Date(b) - new Date(a)) / 60000);
 const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" }) : null);
 
 // ---------- find_places ----------
+async function photonOne(q, near) {
+  let url = `${PHOTON}/api/?limit=1&q=${encodeURIComponent(q)}`;
+  if (near) url += `&lat=${near.lat}&lon=${near.lon}&location_bias_scale=0.5`;
+  const r = await getJson(url, { timeoutMs: 6000 });
+  const f = r.features?.[0];
+  if (!f) return { query: q, found: false };
+  const pr = f.properties || {};
+  return {
+    query: q,
+    found: true,
+    name: pr.name || q,
+    address: [pr.name, pr.street, pr.district, pr.city].filter(Boolean).join(", "),
+    lat: f.geometry.coordinates[1],
+    lon: f.geometry.coordinates[0],
+    kind: pr.osm_value,
+  };
+}
+
+// Photon first (fast, can run in parallel), Nominatim as backup (1 request/second).
 async function geocodeOne(q, near) {
+  try {
+    const r = await photonOne(q, near);
+    if (r.found) return r;
+  } catch {}
+  return geocodeNominatim(q, near);
+}
+
+async function geocodeNominatim(q, near) {
   let path = `/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`;
   if (near) path += `&viewbox=${near.lon - 0.3},${near.lat + 0.2},${near.lon + 0.3},${near.lat - 0.2}`;
   const rows = await nominatim(path);
@@ -81,18 +110,16 @@ async function attractionsNear(center, kinds, limit) {
   const filters = want
     .map((k) => `nwr(around:3500,${center.lat},${center.lon})["tourism"="${k.replace(/"/g, "")}"]["name"];`)
     .join("");
-  const q = `[out:json][timeout:20];(${filters});out center tags 60;`;
-  let data, lastErr;
-  for (const url of OVERPASS) {
-    try {
-      data = await getJson(url, {
-        timeoutMs: 15000,
+  const q = `[out:json][timeout:8];(${filters});out center tags 60;`;
+  // Ask all mirrors at once and take the first good answer; give up after 8 s so the demo stays fast.
+  const data = await Promise.any(
+    OVERPASS.map((url) =>
+      getJson(url, {
+        timeoutMs: 8000,
         init: { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } },
-      });
-      break;
-    } catch (e) { lastErr = e; }
-  }
-  if (!data) throw lastErr;
+      }),
+    ),
+  ).catch(() => { throw new Error("all Overpass mirrors failed or timed out"); });
   const seen = new Set();
   return data.elements
     .map((e) => ({
@@ -112,23 +139,16 @@ async function attractionsNear(center, kinds, limit) {
 export async function find_places({ city, places = [], discover = false, kinds, limit = 8 }) {
   const center = city ? await geocodeOne(city) : null;
   const near = center?.found ? center : null;
-  const found = [];
-  for (const q of places) {
-    const query = city && !q.toLowerCase().includes(city.toLowerCase()) ? `${q}, ${city}` : q;
-    try {
-      found.push(await geocodeOne(query, near));
-    } catch (e) {
-      found.push({ query: q, found: false, error: String(e.message || e) });
-    }
-  }
-  let suggestions = [];
-  if ((discover || !places.length) && near) {
-    try {
-      suggestions = await attractionsNear(near, kinds, Math.min(limit, 15));
-    } catch (e) {
-      suggestions = [{ error: "Overpass unavailable: " + (e.message || e) }];
-    }
-  }
+  const sugg = (discover || !places.length) && near
+    ? attractionsNear(near, kinds, Math.min(limit, 15)).catch((e) => [{ error: "Sight suggestions unavailable: " + (e.message || e) }])
+    : Promise.resolve([]);
+  const found = await Promise.all(
+    places.map((q) => {
+      const query = city && !q.toLowerCase().includes(city.toLowerCase()) ? `${q}, ${city}` : q;
+      return geocodeOne(query, near).catch((e) => ({ query: q, found: false, error: String(e.message || e) }));
+    }),
+  );
+  const suggestions = await sugg;
   return { city: near ? { name: city, lat: near.lat, lon: near.lon } : null, places: found, suggestions };
 }
 
@@ -217,15 +237,19 @@ async function trainsViaTransitous(from, to, when, arriveBy, results) {
   const [a, b] = await Promise.all([transitousGeocode(from), transitousGeocode(to)]);
   const data = await transitousPlan(a, b, when, arriveBy, results);
   return {
-    source: "Transitous (open transit data, backup for DB)",
+    source: "DB timetable via Transitous",
     from: a,
     to: b,
-    options: (data.itineraries || []).slice(0, results).map((it) => ({
-      departure: it.startTime,
-      arrival: it.endTime,
-      departureLocal: hhmm(it.startTime),
-      arrivalLocal: hhmm(it.endTime),
-      durationMin: Math.round(it.duration / 60),
+    options: (data.itineraries || []).slice(0, results).map((it) => {
+      const ride = it.legs.filter((l) => l.mode !== "WALK");
+      const dep = ride[0]?.startTime || it.startTime;
+      const arr = ride[ride.length - 1]?.endTime || it.endTime;
+      return {
+      departure: dep,
+      arrival: arr,
+      departureLocal: hhmm(dep),
+      arrivalLocal: hhmm(arr),
+      durationMin: mins(dep, arr),
       changes: it.transfers ?? 0,
       delayMin: 0,
       price: null,
@@ -241,7 +265,8 @@ async function trainsViaTransitous(from, to, when, arriveBy, results) {
           platform: l.from?.track || null,
           cancelled: false,
         })),
-    })),
+      };
+    }),
   };
 }
 
@@ -250,17 +275,10 @@ export async function search_trains({ from, to, when, arriveBy = false, results 
   if (isNaN(t)) throw new Error(`Could not read the time "${when}". Use ISO 8601, e.g. 2026-11-22T08:00:00+01:00`);
   const iso = t.toISOString();
   const n = Math.min(Math.max(results, 1), 6);
-  try {
-    return await trainsViaDb(from, to, iso, arriveBy, n);
-  } catch (dbErr) {
-    try {
-      const r = await trainsViaTransitous(from, to, iso, arriveBy, n);
-      r.note = "DB API failed (" + (dbErr.message || dbErr) + "), used Transitous instead.";
-      return r;
-    } catch (e2) {
-      throw new Error(`Both train sources failed. DB: ${dbErr.message || dbErr}. Transitous: ${e2.message || e2}`);
-    }
+  if (DB_REST) {
+    try { return await trainsViaDb(from, to, iso, arriveBy, n); } catch {}
   }
+  return trainsViaTransitous(from, to, iso, arriveBy, n);
 }
 
 // ---------- travel_between ----------
@@ -277,10 +295,12 @@ async function walk(a, b) {
 }
 
 async function localTransit(a, b, when) {
-  try {
-    const r = await localTransitDb(a, b, when);
-    if (r) return r;
-  } catch {}
+  if (DB_REST) {
+    try {
+      const r = await localTransitDb(a, b, when);
+      if (r) return r;
+    } catch {}
+  }
   const data = await transitousPlan(a, b, when, false, 1);
   const it = data.itineraries?.[0];
   if (!it) return null;

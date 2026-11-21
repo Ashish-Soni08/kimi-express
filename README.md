@@ -95,11 +95,14 @@ npm run plugin:validate
 
 ## Automation hooks (for recording demos)
 
+The dashboard opens in trip mode. Add `?speed=1` to the URL (`http://127.0.0.1:5177/?speed=1`) to show the speed panel and the Race vs GPU toggle.
+
 | Selector | Meaning |
 | --- | --- |
 | `[data-testid="trip-prompt"]` | Prompt box. Enter submits, Shift+Enter adds a new line |
 | `[data-testid="plan-button"]` | Submit button |
-| `[data-testid="race-toggle"]` | "Race vs GPU" checkbox (only when `KX_GPU_MODEL` is set; remembered per browser) |
+| `[data-testid="status"]` | One-line status under the button ("Checking Deutsche Bahn trains…", "Your day is planned ✓") |
+| `[data-testid="race-toggle"]` | "Race vs GPU" checkbox (only with `?speed=1` and `KX_GPU_MODEL` set; remembered per browser) |
 | `[data-plan-ready]` / `[data-testid="plan-complete"]` | Hidden marker added once the Cerebras plan is fully rendered (trains, map, timeline, metrics) |
 | `[data-testid="race-complete"]` | Hidden marker added once both race lanes finished |
 | `[data-testid="race-verdict"]` | "Cerebras finished N× faster" text |

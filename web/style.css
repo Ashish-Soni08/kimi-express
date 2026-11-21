@@ -49,6 +49,14 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .ask button[type=submit] { width: 100%; border: 0; border-radius: 10px; padding: 11px; font: 700 14px Inter; color: white; background: linear-gradient(135deg, var(--accent), #c63d17); cursor: pointer; }
 .ask button[disabled] { opacity: .6; cursor: progress; }
 .kbd { opacity: .7; font-weight: 500; font-size: 11px; margin-left: 6px; }
+.status { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 20px; }
+.status .txt::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 8px; vertical-align: 1px; }
+.status.busy { color: var(--text); }
+.status.busy .txt::before { background: var(--accent); animation: pulse 1s infinite; }
+.status.ok .txt::before { background: var(--good); }
+.status.err { color: var(--bad); }
+.status.err .txt::before { background: var(--bad); }
+.status .el { font: 500 12px var(--mono); color: var(--muted); }
 
 /* speed */
 .speed { position: relative; overflow: hidden; }

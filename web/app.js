@@ -60,6 +60,27 @@ function fit(points) {
   else if (pts.length > 1) map.flyToBounds(pts, { padding: [40, 40], duration: 0.6, maxZoom: 15 });
 }
 
+// ---------- status line + optional speed panel ----------
+// The speed panel and race toggle only show with ?speed=1 (trip mode is the default).
+const SHOW_SPEED = new URLSearchParams(location.search).get("speed") === "1";
+if (!SHOW_SPEED) $("#speed").classList.add("hidden");
+const STEP = { find_places: "Finding the places…", search_trains: "Checking Deutsche Bahn trains…", travel_between: "Working out walking and transit times…", publish_plan: "Laying out your day…", save_trip: "Saving to your trip log…", list_trips: "Reading your trip log…" };
+let statusT0 = 0, statusTimer = null;
+function status(text, cls = "") {
+  const el = $("#status");
+  el.className = "status " + cls;
+  el.querySelector(".txt").textContent = text;
+}
+function statusStart() {
+  statusT0 = performance.now();
+  status("Kimi is planning your day…", "busy");
+  clearInterval(statusTimer);
+  statusTimer = setInterval(() => {
+    const s = Math.round((performance.now() - statusT0) / 1000);
+    $("#status .el").textContent = s >= 5 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : "";
+  }, 1000);
+}
+function statusStop(text, cls) { clearInterval(statusTimer); $("#status .el").textContent = ""; status(text, cls); }
 // ---------- speed panel ----------
 let timerId = null, t0 = 0;
 function startTimer() {
@@ -220,6 +241,8 @@ function connectEvents() {
     const tag = gpu ? `<span class="lane-tag">${esc(gpuInfo?.label || "GPU")}</span>` : "";
     if (gpu && e.type?.startsWith("tool")) raceTool("gpu");
     if (!gpu && e.type?.startsWith("tool") && racing) raceTool("cerebras");
+    if (e.type === "tool_start" && !gpu && $("#status").classList.contains("busy")) status(STEP[e.name] || "Working…", "busy");
+    if (e.type === "tool_end" && !gpu && e.name !== "publish_plan" && $("#status").classList.contains("busy")) setTimeout(() => $("#status").classList.contains("busy") && status("Kimi is thinking…", "busy"), 600);
     if (e.type === "tool_start") feedAdd(e.id, "run" + (gpu ? " gpu" : ""), `${tag}<span class="t">${LABEL[e.name] || e.name}</span><span class="ms">…</span><div class="sub">${esc(argSummary(e.name, e.args))}</div>`);
     if (e.type === "tool_end" || e.type === "tool_error") {
       const li = feedItems.get(e.id) || feedAdd(e.id, "", "");
@@ -331,6 +354,7 @@ async function ask(prompt) {
   $("#answer").classList.remove("muted");
   $("#answer").classList.add("streaming");
   startTimer();
+  statusStart();
   if (racing) raceStart(); else $("#race").classList.add("hidden");
   const main = streamPlan(prompt, "cerebras", {
     onDelta: (t) => ($("#answer").textContent += t),
@@ -343,7 +367,8 @@ async function ask(prompt) {
   await main;
   const k = feedItems.get("k"); if (k) { k.className = "ok"; k.querySelector(".ms").textContent = "done"; }
   $("#answer").classList.remove("streaming");
-  if (currentPlan) marker("plan-complete"); else setState("error");
+  if (currentPlan) { marker("plan-complete"); statusStop("Your day is planned ✓", "ok"); }
+  else { setState("error"); statusStop("Kimi didn't finish a plan. Try again.", "err"); }
   await gpu;
   if (racing) marker("race-complete");
   setState(document.querySelector("#answer").textContent.includes("⚠️") ? "error" : "done");
@@ -357,7 +382,7 @@ fetch("/api/health").then((r) => r.json()).then((h) => {
   const p = $("#pill-gateway");
   p.textContent = h.gateway === "ok" ? "Gateway connected" : `Gateway ${h.gateway}`;
   p.classList.add(h.gateway === "ok" ? "ok" : "err");
-  if (h.gpu) {
+  if (h.gpu && SHOW_SPEED) {
     gpuInfo = h.gpu;
     $("#go").insertAdjacentHTML("beforebegin", `<label class="race-toggle"><input type="checkbox" id="race-on" data-testid="race-toggle" /> Race vs ${esc(h.gpu.label)}</label>`);
     const cb = $("#race-on");

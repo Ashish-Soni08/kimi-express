@@ -1,2 +1,103 @@
-# kimi-express
-Agentic day-trip planner: trains, maps and travel times in seconds. Kimi K3.1 Pro on Cerebras, powered by OpenClaw.
+# Kimi Express ⚡🚆
+
+**Agentic day-trip planner: trains, maps and travel times in seconds.** Kimi K3.1 Pro on Cerebras, running through the OpenClaw harness.
+
+Planning a day trip in Germany usually means googling sights, flipping to the DB Navigator app for trains, and doing distance maths in your head. Kimi Express does it in one go: tell it where you want to go and what you want to see, and an OpenClaw agent powered by Kimi K3.1 Pro on Cerebras finds the places, checks real Deutsche Bahn connections, works out walking and transit times between stops, and lays the whole day out on a live dashboard. Save the trip to your log and look back at past trips any time.
+
+Built for the Cerebras × Kimi K3.1 Pro × OpenClaw hackathon. `#KimiOnCerebras`
+
+## What you see
+
+- **Where to?** One sentence, e.g. *"Day trip to Berlin tomorrow from Hannover. Museum Island and East Side Gallery, back by 21:00."*
+- **Speed panel:** tokens/sec, time to first token and total time to a full plan, with model time and tool time split out.
+- **Agent activity:** every tool call Kimi makes through OpenClaw, live, with its latency and result.
+- **Map:** your stops, numbered in visiting order, with walking routes and transit hops.
+- **Today's plan:** outbound and return trains, a timeline of stops with times, totals (time on trains, getting around, km walked) and tips.
+- **Trip log:** saved trips with status (planned / done), number of cities and travel time.
+
+## How it works
+
+```
+Dashboard (browser)
+   │  your request
+   ▼
+Kimi Express server (Node, :5177) ──► OpenClaw Gateway (:18789, /v1/chat/completions)
+   ▲                                       │  agent run
+   │  tool calls (HTTP)                    ▼
+   └──────── kimi-express-tools plugin ◄── Kimi K3.1 Pro on Cerebras
+```
+
+- The **OpenClaw agent** runs on `cerebras/moonshotai-kimi-k3.1-pro-trial`.
+- The **kimi-express-tools** OpenClaw plugin gives the agent 6 tools: `find_places`, `search_trains`, `travel_between`, `publish_plan`, `save_trip`, `list_trips`.
+- The plugin forwards each call to the local Kimi Express server, which runs the lookup and streams the result to the dashboard as it happens.
+
+### Data sources (all free, no API keys)
+
+| What | Source |
+| --- | --- |
+| Train connections | Deutsche Bahn via [db.transport.rest](https://v6.db.transport.rest) (backup: [Transitous](https://transitous.org)) |
+| Places / sights | OpenStreetMap [Nominatim](https://nominatim.org) + [Overpass](https://overpass-api.de) |
+| Walking routes | [FOSSGIS OSRM](https://routing.openstreetmap.de) foot router |
+| Local transit between stops | db.transport.rest (includes S-Bahn, U-Bahn, tram, bus) |
+| Map tiles | © OpenStreetMap contributors, © CARTO |
+
+No ticket prices or booking: DB doesn't offer those without a partner contract.
+
+## Run it (Windows, PowerShell)
+
+Requirements: Node 24+, OpenClaw (2026.5.17 or newer), a Cerebras API key with Kimi K3.1 Pro access.
+
+1. **Cerebras key** (never commit it):
+   ```powershell
+   setx CEREBRAS_API_KEY "csk-..."   # then open a new terminal
+   ```
+2. **OpenClaw config:** merge [`openclaw/kimi-express.openclaw.json5`](openclaw/kimi-express.openclaw.json5) into `%USERPROFILE%\.openclaw\openclaw.json`. It sets Kimi on Cerebras as the model, turns on the gateway's local chat-completions endpoint and enables the plugin. If you use the Cerebras provider plugin, `openclaw plugins install @openclaw/cerebras-provider` first.
+3. **Install the tools plugin** (prebuilt `dist/` is included):
+   ```powershell
+   cd plugin
+   openclaw plugins install --link . --force
+   openclaw plugins enable kimi-express-tools
+   cd ..
+   ```
+4. **Start / restart the OpenClaw gateway** so it loads the key, config and plugin:
+   ```powershell
+   openclaw gateway restart
+   ```
+5. **Start the dashboard:**
+   ```powershell
+   $env:OPENCLAW_GATEWAY_TOKEN = "<your gateway token>"   # only if your gateway uses token auth
+   .\start.ps1        # or: npm start, then open http://127.0.0.1:5177
+   ```
+
+The pill in the top right turns green when the dashboard can reach the gateway.
+
+### Settings (environment variables)
+
+| Variable | Default |
+| --- | --- |
+| `OPENCLAW_GATEWAY_URL` | `http://127.0.0.1:18789` |
+| `OPENCLAW_GATEWAY_TOKEN` | none (set if the gateway uses token/password auth) |
+| `KX_AGENT` | `openclaw/default` |
+| `KX_PORT` | `5177` |
+
+### Rebuilding the plugin
+
+```powershell
+cd plugin
+npm install
+npm run plugin:validate
+```
+
+## Repo layout
+
+```
+server/   Node server: dashboard API, trip tools, OpenClaw gateway client, system prompt
+web/      Dashboard (vanilla JS + Leaflet)
+plugin/   OpenClaw tool plugin (TypeScript, defineToolPlugin)
+openclaw/ OpenClaw config snippet
+data/     Your trip log (trips.json, git-ignored)
+```
+
+## License
+
+Apache-2.0

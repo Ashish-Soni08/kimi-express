@@ -1,0 +1,12 @@
+{
+  "name": "kimi-express",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agentic day-trip dashboard: Kimi K3.1 Pro on Cerebras, running through OpenClaw, plans your Deutsche Bahn day trips.",
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "license": "Apache-2.0"
+}

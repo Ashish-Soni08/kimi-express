@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kimi Express</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="logo">⚡</div>
+      <div>
+        <h1>Kimi Express</h1>
+        <p>Day trips planned at Cerebras speed</p>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill" id="pill-model">Kimi K3.1 Pro · Cerebras</span>
+      <span class="pill" id="pill-harness">OpenClaw</span>
+      <span class="pill dot" id="pill-gateway">Gateway…</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- Left: ask + speed + agent activity -->
+    <section class="col left">
+      <form id="ask" class="card ask">
+        <label for="prompt">Where to?</label>
+        <textarea id="prompt" rows="4" placeholder="Day trip to Berlin tomorrow from Hannover. I want to see Museum Island and the East Side Gallery, back home by 21:00."></textarea>
+        <div class="chips" id="chips"></div>
+        <button type="submit" id="go">Plan my day <span class="kbd">Ctrl ↵</span></button>
+      </form>
+
+      <div class="card speed" id="speed">
+        <div class="speed-main">
+          <div class="big" id="m-tps">—</div>
+          <div class="unit">tokens / sec</div>
+        </div>
+        <div class="speed-grid">
+          <div><b id="m-total">—</b><span>plan ready</span></div>
+          <div><b id="m-ttft">—</b><span>first token</span></div>
+          <div><b id="m-tools">—</b><span>tool calls</span></div>
+          <div><b id="m-tokens">—</b><span>output tokens</span></div>
+        </div>
+        <div class="timer" id="timer"></div>
+      </div>
+
+      <div class="card feed">
+        <h2>Agent activity</h2>
+        <ol id="feed"><li class="muted">Kimi's tool calls appear here live.</li></ol>
+      </div>
+    </section>
+
+    <!-- Center: map + answer -->
+    <section class="col center">
+      <div class="card mapcard"><div id="map"></div></div>
+      <div class="card answer">
+        <h2>Kimi says</h2>
+        <div id="answer" class="muted">Ask for a trip to get started.</div>
+      </div>
+    </section>
+
+    <!-- Right: plan + trip log -->
+    <section class="col right">
+      <div class="tabs">
+        <button class="tab active" data-tab="plan">Today's plan</button>
+        <button class="tab" data-tab="log">Trip log <span id="log-count" class="count">0</span></button>
+      </div>
+
+      <div class="card tabpane" id="tab-plan">
+        <div id="plan" class="muted">Your plan will appear here: trains, stops, times and distances.</div>
+      </div>
+
+      <div class="card tabpane hidden" id="tab-log">
+        <div class="stats" id="log-stats"></div>
+        <ul id="log" class="log"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

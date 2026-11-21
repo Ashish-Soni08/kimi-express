@@ -1,0 +1,41 @@
+// Merge into your OpenClaw config (%USERPROFILE%\.openclaw\openclaw.json on Windows).
+// The Cerebras key stays in the CEREBRAS_API_KEY environment variable, never in this file.
+{
+  agents: {
+    defaults: {
+      model: {
+        primary: "cerebras/moonshotai-kimi-k3.1-pro-trial",
+        fallbacks: [], // Kimi on Cerebras is the whole point: no silent fallback
+      },
+    },
+  },
+  models: {
+    mode: "merge",
+    providers: {
+      cerebras: {
+        baseUrl: "https://api.cerebras.ai/v1",
+        apiKey: "${CEREBRAS_API_KEY}",
+        api: "openai-completions",
+        models: [
+          { id: "moonshotai-kimi-k3.1-pro-trial", name: "Kimi K3.1 Pro (trial)", reasoning: true, input: ["text"] },
+        ],
+      },
+    },
+  },
+  gateway: {
+    http: {
+      endpoints: {
+        // The Kimi Express dashboard talks to OpenClaw through this local endpoint.
+        chatCompletions: { enabled: true },
+      },
+    },
+  },
+  plugins: {
+    entries: {
+      "kimi-express-tools": {
+        enabled: true,
+        config: { baseUrl: "http://127.0.0.1:5177" },
+      },
+    },
+  },
+}

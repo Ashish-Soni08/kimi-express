@@ -1,0 +1,28 @@
+{
+  "id": "kimi-express-tools",
+  "name": "Kimi Express Tools",
+  "description": "Day-trip planning tools: places, Deutsche Bahn trains, walking/transit times, trip log.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "Kimi Express dashboard URL, default http://127.0.0.1:5177"
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "find_places",
+      "search_trains",
+      "travel_between",
+      "publish_plan",
+      "save_trip",
+      "list_trips"
+    ]
+  }
+}

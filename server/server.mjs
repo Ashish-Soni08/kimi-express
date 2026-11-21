@@ -1,0 +1,212 @@
+// Kimi Express dashboard server.
+// - Serves the dashboard (web/)
+// - Runs the trip tools for the OpenClaw plugin (POST /api/tools/:name) and broadcasts results to the dashboard
+// - Sends the user's request to the OpenClaw Gateway (Kimi K3.1 Pro on Cerebras) and streams the answer back with speed metrics
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
+import { TOOLS, list_trips, save_trip, delete_trip } from "./tools.mjs";
+import { SYSTEM_PROMPT } from "./prompt.mjs";
+
+const PORT = +(process.env.KX_PORT || 5177);
+const HOST = process.env.KX_HOST || "127.0.0.1";
+const GATEWAY = (process.env.OPENCLAW_GATEWAY_URL || "http://127.0.0.1:18789").replace(/\/$/, "");
+const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_PASSWORD || "";
+const AGENT = process.env.KX_AGENT || "openclaw/default";
+const WEB = fileURLToPath(new URL("../web/", import.meta.url));
+
+// ---------- dashboard event bus (SSE) ----------
+const clients = new Set();
+let run = null; // the plan currently being generated
+function broadcast(evt) {
+  const line = `data: ${JSON.stringify(evt)}\n\n`;
+  for (const res of clients) res.write(line);
+}
+
+const json = (res, code, body) => {
+  res.writeHead(code, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+};
+async function body(req) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const s = Buffer.concat(chunks).toString("utf8");
+  return s ? JSON.parse(s) : {};
+}
+
+// ---------- tool endpoint (called by the OpenClaw plugin) ----------
+async function runTool(name, args) {
+  const fn = TOOLS[name];
+  if (!fn) throw Object.assign(new Error(`Unknown tool ${name}`), { code: 404 });
+  const id = Math.random().toString(36).slice(2, 9);
+  const t0 = performance.now();
+  broadcast({ type: "tool_start", id, name, args });
+  try {
+    const result = await fn(args || {});
+    const ms = Math.round(performance.now() - t0);
+    if (run) run.toolMs += ms, run.toolCalls++;
+    broadcast({ type: "tool_end", id, name, args, result, ms });
+    return result;
+  } catch (e) {
+    const ms = Math.round(performance.now() - t0);
+    if (run) run.toolMs += ms, run.toolCalls++;
+    broadcast({ type: "tool_error", id, name, args, error: String(e.message || e), ms });
+    throw e;
+  }
+}
+
+// ---------- plan endpoint: user prompt -> OpenClaw Gateway -> Kimi on Cerebras ----------
+async function plan(req, res) {
+  const { prompt, conversation } = await body(req);
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+  const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
+
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Berlin", weekday: "long", year: "numeric", month: "2-digit", day: "2-digit" });
+  const me = (run = { t0: performance.now(), toolMs: 0, toolCalls: 0, firstTokenMs: null, chars: 0 });
+  broadcast({ type: "run_start", prompt });
+
+  const ctrl = new AbortController();
+  res.on("close", () => { if (!res.writableEnded) ctrl.abort(); });
+
+  let usage = null;
+  let text = "";
+  try {
+    const r = await fetch(`${GATEWAY}/v1/chat/completions`, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}),
+      },
+      body: JSON.stringify({
+        model: AGENT,
+        stream: true,
+        stream_options: { include_usage: true },
+        user: conversation ? `kimi-express:${conversation}` : undefined,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT.replace("{{TODAY}}", today) },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+    if (!r.ok) {
+      const t = await r.text();
+      throw new Error(`OpenClaw Gateway answered HTTP ${r.status}: ${t.slice(0, 300)}`);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") continue;
+        let chunk;
+        try { chunk = JSON.parse(data); } catch { continue; }
+        if (chunk.error) throw new Error(chunk.error.message || JSON.stringify(chunk.error));
+        if (chunk.usage) usage = chunk.usage;
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (delta) {
+          if (me.firstTokenMs == null) me.firstTokenMs = performance.now() - me.t0;
+          text += delta;
+          send({ type: "delta", text: delta });
+        }
+      }
+    }
+    const totalMs = performance.now() - me.t0;
+    const completion = usage?.completion_tokens ?? Math.round(text.length / 4);
+    const modelMs = Math.max(1, totalMs - me.toolMs);
+    const metrics = {
+      type: "metrics",
+      totalMs: Math.round(totalMs),
+      toolMs: me.toolMs,
+      modelMs: Math.round(modelMs),
+      toolCalls: me.toolCalls,
+      firstTokenMs: me.firstTokenMs && Math.round(me.firstTokenMs),
+      promptTokens: usage?.prompt_tokens ?? null,
+      cachedTokens: usage?.prompt_tokens_details?.cached_tokens ?? null,
+      completionTokens: completion,
+      estimated: !usage,
+      tokensPerSecond: Math.round(completion / (modelMs / 1000)),
+    };
+    send(metrics);
+    broadcast(metrics);
+    send({ type: "done", text });
+  } catch (e) {
+    if (e.name !== "AbortError") send({ type: "error", error: String(e.message || e) });
+  } finally {
+    if (run === me) run = null;
+    res.end();
+  }
+}
+
+// ---------- static files ----------
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
+async function serveStatic(req, res) {
+  const p = normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(/^([/\\])+/, "");
+  const file = join(WEB, p || "index.html");
+  if (!file.startsWith(WEB)) return json(res, 403, { error: "forbidden" });
+  try {
+    const data = await readFile(file);
+    res.writeHead(200, { "Content-Type": TYPES[extname(file)] || "application/octet-stream" });
+    res.end(data);
+  } catch {
+    json(res, 404, { error: "not found" });
+  }
+}
+
+createServer(async (req, res) => {
+  const url = new URL(req.url, "http://x");
+  try {
+    if (url.pathname === "/api/events") {
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+      res.write(`data: ${JSON.stringify({ type: "hello" })}\n\n`);
+      clients.add(res);
+      const ping = setInterval(() => res.write(": ping\n\n"), 15000);
+      req.on("close", () => { clients.delete(res); clearInterval(ping); });
+      return;
+    }
+    if (url.pathname.startsWith("/api/tools/") && req.method === "POST") {
+      const name = url.pathname.slice("/api/tools/".length);
+      try {
+        return json(res, 200, await runTool(name, await body(req)));
+      } catch (e) {
+        return json(res, e.code || 502, { error: String(e.message || e) });
+      }
+    }
+    if (url.pathname === "/api/plan" && req.method === "POST") return plan(req, res);
+    if (url.pathname === "/api/trips" && req.method === "GET") return json(res, 200, await list_trips({ limit: 200 }));
+    if (url.pathname === "/api/trips" && req.method === "POST") {
+      const b = await body(req);
+      const r = await save_trip(b);
+      broadcast({ type: "trips_changed" });
+      return json(res, 200, r);
+    }
+    if (url.pathname.startsWith("/api/trips/") && req.method === "DELETE") {
+      await delete_trip({ id: decodeURIComponent(url.pathname.slice("/api/trips/".length)) });
+      broadcast({ type: "trips_changed" });
+      return json(res, 200, { ok: true });
+    }
+    if (url.pathname === "/api/health") {
+      let gateway = "unreachable";
+      try {
+        const r = await fetch(`${GATEWAY}/v1/models`, { headers: GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}, signal: AbortSignal.timeout(3000) });
+        gateway = r.ok ? "ok" : `HTTP ${r.status}`;
+      } catch {}
+      return json(res, 200, { ok: true, gateway, agent: AGENT, tokenSet: !!GATEWAY_TOKEN });
+    }
+    return serveStatic(req, res);
+  } catch (e) {
+    json(res, 500, { error: String(e.message || e) });
+  }
+}).listen(PORT, HOST, () => {
+  console.log(`Kimi Express dashboard: http://${HOST}:${PORT}`);
+  console.log(`OpenClaw Gateway: ${GATEWAY} (agent ${AGENT}, token ${GATEWAY_TOKEN ? "set" : "NOT set"})`);
+});

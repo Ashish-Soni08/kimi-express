@@ -1,0 +1,39 @@
+{
+  "name": "openclaw-plugin-kimi-express-tools",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "OpenClaw tools for Kimi Express: places, Deutsche Bahn trains, walking/transit times, trip log.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "plugin:build": "npm run build && openclaw plugins build --entry ./dist/index.js",
+    "plugin:validate": "npm run build && openclaw plugins validate --entry ./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.5.17"
+  },
+  "dependencies": {
+    "typebox": "^1.1.38"
+  },
+  "devDependencies": {
+    "openclaw": "2026.11.6",
+    "typescript": "7.0.2",
+    "@types/node": "^24.0.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.17"
+    },
+    "build": {
+      "openclawVersion": "2026.11.6"
+    }
+  }
+}

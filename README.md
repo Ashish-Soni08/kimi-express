@@ -56,14 +56,16 @@ Requirements: Node 24+, OpenClaw (2026.5.17 or newer), a Cerebras API key with K
 3. **Install the tools plugin** (prebuilt `dist/` is included):
    ```powershell
    cd plugin
-   openclaw plugins install --link . --force
+   npm ci --omit=dev --omit=peer      # installs the plugin's one runtime dependency (typebox)
+   openclaw plugins install --link . --force --accept-capabilities
    openclaw plugins enable kimi-express-tools
    cd ..
    ```
 4. **Start / restart the OpenClaw gateway** so it loads the key, config and plugin:
    ```powershell
-   openclaw gateway restart
+   openclaw gateway --port 18789
    ```
+   Wait for `gateway ready` in its log before sending the first request (on a slow machine, loading plugins can take a few minutes). The gateway token is `gateway.auth.token` in `openclaw.json`.
 5. **Start the dashboard:**
    ```powershell
    $env:OPENCLAW_GATEWAY_TOKEN = "<your gateway token>"   # only if your gateway uses token auth

@@ -340,6 +340,60 @@ async function trainsViaTransitous(from, to, when, arriveBy, results) {
   };
 }
 
+// Google Routes API, transit mode limited to rail (Deutsche Bahn long-distance and regional, S-Bahn).
+async function trainsViaGoogle(from, to, iso, arriveBy, results) {
+  const body = {
+    origin: { address: from },
+    destination: { address: to },
+    travelMode: "TRANSIT",
+    computeAlternativeRoutes: true,
+    transitPreferences: { allowedTravelModes: ["RAIL"] },
+    languageCode: "en",
+    regionCode: "DE",
+    [arriveBy ? "arrivalTime" : "departureTime"]: iso,
+  };
+  const r = await getJson("https://routes.googleapis.com/directions/v2:computeRoutes", {
+    timeoutMs: 10000,
+    init: {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": GOOGLE_KEY, "X-Goog-FieldMask": "routes.duration,routes.legs.steps.travelMode,routes.legs.steps.transitDetails" },
+    },
+  });
+  const options = (r.routes || []).map((route) => {
+    const steps = (route.legs || []).flatMap((l) => l.steps || []).filter((st) => st.travelMode === "TRANSIT" && st.transitDetails);
+    if (!steps.length) return null;
+    const first = steps[0].transitDetails, last = steps[steps.length - 1].transitDetails;
+    const dep = first.stopDetails?.departureTime, arr = last.stopDetails?.arrivalTime;
+    return {
+      departure: dep,
+      arrival: arr,
+      departureLocal: hhmm(dep),
+      arrivalLocal: hhmm(arr),
+      durationMin: mins(dep, arr),
+      changes: steps.length - 1,
+      delayMin: 0,
+      price: null,
+      legs: steps.map((st) => {
+        const t = st.transitDetails, line = t.transitLine || {};
+        return {
+          line: line.nameShort && line.name && !line.name.startsWith(line.nameShort) ? `${line.nameShort} ${line.name}` : line.nameShort || line.name || line.vehicle?.name?.text || "Train",
+          product: line.vehicle?.type || "RAIL",
+          from: t.stopDetails?.departureStop?.name,
+          to: t.stopDetails?.arrivalStop?.name,
+          dep: hhmm(t.stopDetails?.departureTime),
+          arr: hhmm(t.stopDetails?.arrivalTime),
+          platform: null,
+          headsign: t.headsign || null,
+          cancelled: false,
+        };
+      }),
+    };
+  }).filter(Boolean).sort((a, b) => new Date(a.departure) - new Date(b.departure)).slice(0, results);
+  if (!options.length) throw new Error("Google returned no rail connections");
+  return { source: "Deutsche Bahn timetable via Google Maps", from: { name: from }, to: { name: to }, options };
+}
+
 export async function search_trains({ from, to, when, arriveBy = false, results = 4 }) {
   const t = when ? new Date(when) : new Date();
   if (isNaN(t)) throw new Error(`Could not read the time "${when}". Use ISO 8601, e.g. 2026-11-22T08:00:00+01:00`);
@@ -347,6 +401,10 @@ export async function search_trains({ from, to, when, arriveBy = false, results 
   const n = Math.min(Math.max(results, 1), 6);
   if (DB_REST) {
     try { return await trainsViaDb(from, to, iso, arriveBy, n); } catch {}
+  }
+  // Google first when a key is set (KX_TRAINS=transitous skips it); Transitous is the automatic backup.
+  if (GOOGLE_KEY && process.env.KX_TRAINS !== "transitous") {
+    try { return await trainsViaGoogle(from, to, iso, arriveBy, n); } catch {}
   }
   return trainsViaTransitous(from, to, iso, arriveBy, n);
 }

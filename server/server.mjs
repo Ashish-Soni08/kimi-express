@@ -17,11 +17,14 @@ const GATEWAY = (process.env.OPENCLAW_GATEWAY_URL || "http://127.0.0.1:18789").r
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_PASSWORD || "";
 const AGENT = process.env.KX_AGENT || "openclaw/default";
 // Optional GPU-hosted Kimi for the side-by-side race (any OpenClaw model ref). Cerebras stays the default lane.
-const GPU_MODEL = process.env.KX_GPU_MODEL || "";
-const GPU_LABEL = process.env.KX_GPU_LABEL || "GPU (Nebius)";
+// Also the "Nebius" choice in the dashboard's model picker. KX_GPU_MODEL=off removes it.
+const GPU_MODEL = process.env.KX_GPU_MODEL === "off" ? "" : process.env.KX_GPU_MODEL || "nebius/moonshotai/Kimi-K3.1-Pro";
+const GPU_LABEL = process.env.KX_GPU_LABEL || "Nebius";
 // The React dashboard (app/dist) is served when it has been built; KX_UI=classic serves the original web/ page.
-const APP_DIST = fileURLToPath(new URL("../app/dist/", import.meta.url));
-const WEB = process.env.KX_UI !== "classic" && existsSync(join(APP_DIST, "index.html")) ? APP_DIST : fileURLToPath(new URL("../web/", import.meta.url));
+// KX_UI picks the dashboard: default = dashboard/out (Next.js + ui-sdk), "vite" = app/dist, "classic" = web/.
+const UI_DIRS = { next: "../dashboard/out/", vite: "../app/dist/", classic: "../web/" };
+const uiDir = (k) => fileURLToPath(new URL(UI_DIRS[k], import.meta.url));
+const WEB = [process.env.KX_UI, "next", "vite"].filter((k) => UI_DIRS[k]).map(uiDir).find((d) => existsSync(join(d, "index.html"))) || uiDir("classic");
 
 // ---------- dashboard event bus (SSE) ----------
 const clients = new Set();
@@ -206,7 +209,7 @@ async function plan(req, res) {
 }
 
 // ---------- static files ----------
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".woff2": "font/woff2", ".ico": "image/x-icon", ".txt": "text/plain" };
 async function serveStatic(req, res) {
   const p = normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(/^([/\\])+/, "");
   const file = join(WEB, p || "index.html");
@@ -281,5 +284,6 @@ createServer(async (req, res) => {
   console.log(`Kimi Express dashboard: http://${HOST}:${PORT}`);
   console.log(`OpenClaw Gateway: ${GATEWAY} (agent ${AGENT}, token ${GATEWAY_TOKEN ? "set" : "NOT set"})`);
   console.log(GOOGLE_KEY_VAR ? `Google Maps Platform: on (key from env ${GOOGLE_KEY_VAR})` : "Google Maps Platform: off (OpenStreetMap, Photon, OSRM)");
-  console.log(GPU_MODEL ? `Race mode: Cerebras vs ${GPU_LABEL} (${GPU_MODEL})` : "Race mode off (set KX_GPU_MODEL to enable)");
+  console.log(`Dashboard UI: ${WEB}`);
+  console.log(GPU_MODEL ? `Model picker: Cerebras or ${GPU_LABEL} (${GPU_MODEL})` : "Model picker: Cerebras only (KX_GPU_MODEL=off)");
 });

@@ -74,6 +74,14 @@ Requirements: Node 24+, OpenClaw (2026.5.17 or newer), a Cerebras API key with K
 
 The pill in the top right turns green when the dashboard can reach the gateway.
 
+### Google Maps (optional)
+
+Set a Google Maps Platform key in `GOOGLE_MAPS_API_KEY` (or point `KX_GOOGLE_KEY_ENV` at the variable that holds it) with **Maps JavaScript API**, **Places API (New)** and **Routes API** enabled. The dashboard then uses a Google map, Kimi's `find_places` uses Google Places (ratings, opening hours, Maps links) and walking routes come from Google Routes. Without a key everything falls back to OpenStreetMap, Photon and OSRM.
+
+### Dashboard UI
+
+The dashboard is a React + Vite + Tailwind app in `app/`. A built copy is committed in `app/dist/` and served by `node server/server.mjs`. To change it: `cd app; npm install; npm run build` (or `npm run dev` with the server running). `KX_UI=classic` serves the original page in `web/`.
+
 ### Settings (environment variables)
 
 | Variable | Default |

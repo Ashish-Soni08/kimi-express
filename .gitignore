@@ -228,3 +228,4 @@ data/trips.json
 .env
 
 !plugin/dist/
+!app/dist/

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 // Kimi Express dashboard server.
 // - Serves the dashboard (web/)
 // - Runs the trip tools for the OpenClaw plugin (POST /api/tools/:name) and broadcasts results to the dashboard
@@ -18,7 +19,9 @@ const AGENT = process.env.KX_AGENT || "openclaw/default";
 // Optional GPU-hosted Kimi for the side-by-side race (any OpenClaw model ref). Cerebras stays the default lane.
 const GPU_MODEL = process.env.KX_GPU_MODEL || "";
 const GPU_LABEL = process.env.KX_GPU_LABEL || "GPU (Nebius)";
-const WEB = fileURLToPath(new URL("../web/", import.meta.url));
+// The React dashboard (app/dist) is served when it has been built; KX_UI=classic serves the original web/ page.
+const APP_DIST = fileURLToPath(new URL("../app/dist/", import.meta.url));
+const WEB = process.env.KX_UI !== "classic" && existsSync(join(APP_DIST, "index.html")) ? APP_DIST : fileURLToPath(new URL("../web/", import.meta.url));
 
 // ---------- dashboard event bus (SSE) ----------
 const clients = new Set();

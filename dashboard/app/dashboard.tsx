@@ -319,7 +319,7 @@ export default function Dashboard() {
           </div>
           <span className="flex items-center gap-1.5 text-xs text-[var(--kx-muted)]" data-testid="gateway-pill">
             <span className="kx-dot" data-tone={online ? "ok" : gw ? "err" : "idle"} />
-            {gw === "ok" ? "Agent online" : gw === "busy" ? "Agent busy" : gw ? "Agent offline" : "Connecting…"}
+            {gw === "ok" ? "OpenClaw agent online" : gw === "busy" ? "OpenClaw agent busy" : gw ? "OpenClaw agent offline" : "Connecting…"}
           </span>
         </header>
 
@@ -400,7 +400,7 @@ export default function Dashboard() {
             </span>
             <span className="flex-none whitespace-nowrap pl-3 text-xs text-[var(--kx-muted)]">
               {running && elapsed >= 3 ? <span className="font-mono tabular-nums">{`${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")} · `}</span> : null}
-              Kimi K3.1 Pro on {MODEL[lane]} · OpenClaw
+              Kimi K3.1 Pro on {MODEL[lane]}
             </span>
           </div>
         </form>

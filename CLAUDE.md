@@ -3,7 +3,8 @@
 Agentic day-trip planner for the Cerebras × Kimi K3.1 Pro × OpenClaw hackathon (deadline Sun 2026-11-22, 10:00 AM PT). See README.md for the full setup.
 
 ## Hackathon rules (must hold for every change)
-- Kimi K3.1 Pro on Cerebras is the core: OpenClaw model `cerebras/moonshotai-kimi-k3.1-pro-trial`, **no fallbacks**. Cerebras limits: 100K uncached tokens/min, 40,960 max completion tokens.
+- Kimi K3.1 Pro on Cerebras is the core: OpenClaw model `cerebras/moonshotai-kimi-k3.1-pro-trial`. Cerebras limits: 100K uncached tokens/min, 40,960 max completion tokens.
+- The dashboard has a model picker (Ashish's decision, 2026-11-22): Cerebras (default) or Nebius (`KX_GPU_MODEL`, default `nebius/moonshotai/Kimi-K3.1-Pro`). Both run the same OpenClaw agent and tools; there is no automatic fallback.
 - Everything runs through the **OpenClaw harness** (gateway + the `kimi-express-tools` plugin). Never call Cerebras directly from the app.
 - Public X/Reddit demos are recorded with **standard OpenClaw**, never the speed-patch build.
 - Demo video ≤ 60 s, shows Cerebras speed; side-by-side vs a GPU provider is recommended (the Race vs GPU mode).
@@ -20,7 +21,8 @@ Agentic day-trip planner for the Cerebras × Kimi K3.1 Pro × OpenClaw hackathon
 ## Layout
 - `server/tools.mjs` trip tools; `server/server.mjs` dashboard API, tool endpoint for the plugin, gateway client and speed metrics; `server/prompt.mjs` system prompt (keep it stable for prompt caching).
 - `plugin/` OpenClaw tool plugin (forwards tool calls to `POST /api/tools/:name`). After editing `plugin/src`, run `npm run build` and `openclaw plugins build --entry ./dist/index.js`, and commit `dist/` and `openclaw.plugin.json`.
-- `web/` dashboard (vanilla JS, Leaflet vendored). Keep the `data-testid` hooks stable; the demo recorder uses them.
+- `dashboard/` the dashboard: Next.js 16 + React 19 + Tailwind 4 + ui-sdk, exported statically to `dashboard/out/` (committed) and served by `server/server.mjs`. After editing, run `npm run build` in `dashboard/` and commit `out/`. Follow `dashboard/AGENTS.md`. `?demo=1` plays a sample run without the agent (made-up times, labelled "Sample data"; never record it as a real run).
+- Older UIs: `app/` (Vite React, `KX_UI=vite`) and `web/` (vanilla JS, `KX_UI=classic`). Keep the `data-testid` hooks stable in all of them; the demo recorder uses them.
 - `scripts/smoke-tools.mjs` checks the data sources without OpenClaw or Kimi.
 
 ## Data sources (free, no keys)

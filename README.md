@@ -80,7 +80,7 @@ Set a Google Maps Platform key in `GOOGLE_MAPS_API_KEY` (or point `KX_GOOGLE_KEY
 
 ### Dashboard UI
 
-The dashboard is a React + Vite + Tailwind app in `app/`. A built copy is committed in `app/dist/` and served by `node server/server.mjs`. To change it: `cd app; npm install; npm run build` (or `npm run dev` with the server running). `KX_UI=classic` serves the original page in `web/`.
+The dashboard is a Next.js + React 19 + Tailwind app built on [ui-sdk](https://ui-sdk.dev) in `dashboard/`. A static build is committed in `dashboard/out/` and served by `node server/server.mjs`. To change it: `cd dashboard; npm install; npm run build`. Pick the model with the **Cerebras / Nebius** switch next to the Plan button; both run the same OpenClaw agent and tools. `http://127.0.0.1:5177/?demo=1` plays a sample run with made-up times so you can look at the design without the agent. `KX_UI=vite` serves the earlier React page in `app/`, `KX_UI=classic` the original page in `web/`.
 
 ### Settings (environment variables)
 
@@ -90,8 +90,8 @@ The dashboard is a React + Vite + Tailwind app in `app/`. A built copy is commit
 | `OPENCLAW_GATEWAY_TOKEN` | none (set if the gateway uses token/password auth) |
 | `KX_AGENT` | `openclaw/default`. Use `openclaw/kimi-express` with the lean agent from the config snippet |
 | `KX_PORT` | `5177` |
-| `KX_GPU_MODEL` | none. Set to a GPU-hosted Kimi, e.g. `nebius/moonshotai/Kimi-K3.1-Pro`, to show the **Race vs GPU** toggle |
-| `KX_GPU_LABEL` | `GPU (Nebius)` |
+| `KX_GPU_MODEL` | `nebius/moonshotai/Kimi-K3.1-Pro`: the model behind the **Nebius** choice in the picker. `off` hides it |
+| `KX_GPU_LABEL` | `Nebius` |
 
 ### Rebuilding the plugin
 

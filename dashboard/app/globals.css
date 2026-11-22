@@ -396,6 +396,53 @@ body {
   color: var(--kx-muted);
 }
 
+.kx-add {
+  margin-left: auto;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px dashed var(--ui-input);
+  font-family: var(--ui-font-sans);
+  font-size: 11.5px;
+  color: var(--kx-muted);
+  transition:
+    color 150ms var(--kx-ease),
+    border-color 150ms var(--kx-ease),
+    scale 150ms var(--kx-ease);
+}
+.kx-add:hover:not(:disabled) {
+  color: var(--kx-accent-ink);
+  border-color: var(--kx-accent);
+}
+.kx-add:active:not(:disabled) {
+  scale: 0.96;
+}
+.kx-add:disabled {
+  opacity: 0.4;
+}
+.kx-add:focus-visible {
+  outline: 2px solid var(--kx-accent);
+  outline-offset: 2px;
+}
+.kx-add-form {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--ui-font-sans);
+}
+.kx-add-form [data-slot="input"] {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+.kx-leg:has(.kx-add-form) > :not(.kx-add-form) {
+  display: none;
+}
+
 .kx-steps [data-slot="timeline-item"] {
   padding-bottom: 16px;
 }

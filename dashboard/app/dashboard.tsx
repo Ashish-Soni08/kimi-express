@@ -191,7 +191,7 @@ export default function Dashboard() {
     setAnswer("RE 1 at 09:12 gets you to Potsdam by 09:37. Dutch Quarter first, then the Brandenburg Gate and Sanssouci, and the S 7 home at 17:54. (Sample data.)");
   }
 
-  async function ask(text: string) {
+  async function ask(text: string, keepPlan = false) {
     if (!text.trim() || runRef.current) return;
     runRef.current = true;
     laneRef.current = lane;
@@ -201,10 +201,12 @@ export default function Dashboard() {
     setStatus({ text: "Kimi is planning your day…", tone: "busy" });
     setSteps([]);
     setAnswer("");
-    setPlaces([]);
+    if (!keepPlan) {
+      setPlaces([]);
+      setRoutes([]);
+      setPlan(null);
+    }
     setSugg([]);
-    setRoutes([]);
-    setPlan(null);
     setSaved(false);
     planRef.current = null;
     busyRef.current = 0;
@@ -248,6 +250,17 @@ export default function Dashboard() {
       setStatus({ text: "Kimi didn't finish a plan. Try again.", tone: "err" });
       setState("error");
     }
+  }
+
+  function addStop(after: number, name: string) {
+    if (!plan) return;
+    const stops = plan.stops || [];
+    const where = after < 0 ? `as the first stop, before ${stops[0]?.name}` : `right after stop ${after + 1} (${stops[after]?.name})`;
+    const current = { ...plan, routes: undefined, places: undefined, id: undefined };
+    ask(
+      `Update my day trip: add "${name}" ${where}. Keep the other stops and their order. Find the new place, recompute travel_between for all legs, shift the times, keep the same trains if they still fit (otherwise search again), then publish_plan with the full updated plan.\nCurrent plan: ${JSON.stringify(current)}`,
+      true,
+    );
   }
 
   async function save() {
@@ -418,7 +431,7 @@ export default function Dashboard() {
             </TabsTab>
           </TabsList>
           <TabsPanel value="plan" className="kx-scroll">
-            <PlanPanel plan={plan} places={places} saved={saved} onSave={save} running={running} onFocus={(s) => setFocus({ lat: s.lat, lon: s.lon, n: Date.now() })} />
+            <PlanPanel plan={plan} places={places} saved={saved} onSave={save} running={running} onAddStop={addStop} onFocus={(s) => setFocus({ lat: s.lat, lon: s.lon, n: Date.now() })} />
           </TabsPanel>
           <TabsPanel value="steps" className="kx-scroll">
             <StepsPanel steps={steps} answer={answer} running={running} model={MODEL[laneRef.current]} />
@@ -521,6 +534,7 @@ function PlanPanel({
   onSave,
   running,
   onFocus,
+  onAddStop,
 }: {
   plan: Plan | null;
   places: Place[];
@@ -528,6 +542,7 @@ function PlanPanel({
   onSave: () => Promise<void> | void;
   running: boolean;
   onFocus: (s: { lat: number; lon: number }) => void;
+  onAddStop: (after: number, name: string) => void;
 }) {
   if (!plan)
     return (
@@ -577,13 +592,16 @@ function PlanPanel({
                   </span>
                 )}
                 {s.note}
-                {leg && i < stops.length - 1 && (
-                  <span className="kx-leg">
-                    <ModeIcon mode={leg.mode} />
-                    {fmtDur(leg.minutes)}
-                    {leg.km ? ` · ${leg.km} km` : ""}
-                  </span>
-                )}
+                <span className="kx-leg">
+                  {leg && i < stops.length - 1 && (
+                    <>
+                      <ModeIcon mode={leg.mode} />
+                      {fmtDur(leg.minutes)}
+                      {leg.km ? ` · ${leg.km} km` : ""}
+                    </>
+                  )}
+                  <AddStop after={s.name} disabled={running} onAdd={(name) => onAddStop(i, name)} />
+                </span>
               </TimelineDescription>
             </TimelineItem>
           );
@@ -606,6 +624,45 @@ function PlanPanel({
         {saved ? "In your trip log" : "Save to trip log"}
       </Button>
     </div>
+  );
+}
+
+function AddStop({ after, disabled, onAdd }: { after: string; disabled: boolean; onAdd: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  if (!open)
+    return (
+      <button type="button" className="kx-add" data-testid="add-stop" disabled={disabled} onClick={() => setOpen(true)}>
+        <span aria-hidden="true">+</span> Add a stop<span className="sr-only"> after {after}</span>
+      </button>
+    );
+  const submit = () => {
+    if (!name.trim()) return;
+    onAdd(name.trim());
+    setOpen(false);
+    setName("");
+  };
+  return (
+    <span className="kx-add-form kx-rise">
+      <Input
+        autoFocus
+        aria-label={`Stop to add after ${after}`}
+        data-testid="add-stop-input"
+        placeholder="Place, café, museum…"
+        value={name}
+        onValueChange={(v: string) => setName(v)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") submit();
+          if (e.key === "Escape") setOpen(false);
+        }}
+      />
+      <button type="button" className="kx-chip" data-testid="add-stop-confirm" onClick={submit}>
+        Add
+      </button>
+      <button type="button" className="kx-chip" onClick={() => setOpen(false)}>
+        Cancel
+      </button>
+    </span>
   );
 }
 

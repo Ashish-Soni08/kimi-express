@@ -7,7 +7,7 @@ import { request as httpsRequest } from "node:https";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TOOLS, list_trips, save_trip, delete_trip, get_trip } from "./tools.mjs";
+import { TOOLS, list_trips, save_trip, delete_trip, get_trip, GOOGLE_KEY_VAR } from "./tools.mjs";
 import { SYSTEM_PROMPT } from "./prompt.mjs";
 
 const PORT = +(process.env.KX_PORT || 5177);
@@ -253,6 +253,12 @@ createServer(async (req, res) => {
       broadcast({ type: "trips_changed" });
       return json(res, 200, { ok: true });
     }
+    if (url.pathname === "/api/maps-config") {
+      // The Maps JavaScript API needs the key in the browser. The dashboard only listens on localhost.
+      // Set KX_GOOGLE_MAP=0 to keep the OpenStreetMap map even when a key is set.
+      const key = GOOGLE_KEY_VAR && process.env.KX_GOOGLE_MAP !== "0" ? process.env[GOOGLE_KEY_VAR] : null;
+      return json(res, 200, { googleKey: key || null });
+    }
     if (url.pathname === "/api/health") {
       let gateway = "unreachable";
       try {
@@ -262,7 +268,7 @@ createServer(async (req, res) => {
         // A timeout means the gateway accepted the connection but is busy (e.g. mid agent run); refused means it's down.
         if (e?.name === "TimeoutError") gateway = "busy";
       }
-      return json(res, 200, { ok: true, gateway, agent: AGENT, tokenSet: !!GATEWAY_TOKEN, gpu: GPU_MODEL ? { model: GPU_MODEL, label: GPU_LABEL } : null });
+      return json(res, 200, { ok: true, gateway, agent: AGENT, tokenSet: !!GATEWAY_TOKEN, google: GOOGLE_KEY_VAR ? { keyVar: GOOGLE_KEY_VAR } : null, gpu: GPU_MODEL ? { model: GPU_MODEL, label: GPU_LABEL } : null });
     }
     return serveStatic(req, res);
   } catch (e) {
@@ -271,5 +277,6 @@ createServer(async (req, res) => {
 }).listen(PORT, HOST, () => {
   console.log(`Kimi Express dashboard: http://${HOST}:${PORT}`);
   console.log(`OpenClaw Gateway: ${GATEWAY} (agent ${AGENT}, token ${GATEWAY_TOKEN ? "set" : "NOT set"})`);
+  console.log(GOOGLE_KEY_VAR ? `Google Maps Platform: on (key from env ${GOOGLE_KEY_VAR})` : "Google Maps Platform: off (OpenStreetMap, Photon, OSRM)");
   console.log(GPU_MODEL ? `Race mode: Cerebras vs ${GPU_LABEL} (${GPU_MODEL})` : "Race mode off (set KX_GPU_MODEL to enable)");
 });

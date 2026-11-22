@@ -86,6 +86,24 @@
   </main>
 
   <script src="vendor/leaflet/leaflet.js"></script>
-  <script src="app.js"></script>
+  <script>
+    // Use Google Maps when the server has a Google key, otherwise the built-in OpenStreetMap map.
+    (function boot() {
+      const start = () => { const s = document.createElement("script"); s.src = "app.js"; document.body.appendChild(s); };
+      fetch("/api/maps-config").then((r) => r.json()).then((c) => {
+        if (!c.googleKey) return start();
+        const shim = document.createElement("script");
+        shim.src = "gmap-shim.js";
+        shim.onload = () => {
+          window.kxMapsReady = () => { window.L = window.makeGoogleShim(); document.body.dataset.map = "google"; start(); };
+          const g = document.createElement("script");
+          g.src = "https://maps.googleapis.com/maps/api/js?key=" + encodeURIComponent(c.googleKey) + "&v=weekly&libraries=marker&loading=async&callback=kxMapsReady";
+          g.onerror = start;
+          document.head.appendChild(g);
+        };
+        document.head.appendChild(shim);
+      }).catch(start);
+    })();
+  </script>
 </body>
 </html>

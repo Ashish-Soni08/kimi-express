@@ -15,6 +15,10 @@ const PHOTON = process.env.KX_PHOTON || "https://photon.komoot.io";
 const NOMINATIM = process.env.KX_NOMINATIM || "https://nominatim.openstreetmap.org";
 const OVERPASS = (process.env.KX_OVERPASS || "https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter,https://overpass.kumi.systems/api/interpreter").split(",");
 const OSRM_FOOT = process.env.KX_OSRM_FOOT || "https://routing.openstreetmap.de/routed-foot/route/v1/foot";
+// Google Maps Platform (optional). The key is read from the environment only and never logged or sent to Kimi.
+const GOOGLE_KEY_VARS = [process.env.KX_GOOGLE_KEY_ENV, "GOOGLE_MAPS_API_KEY", "GOOGLE_MAPS_KEY", "GMAPS_API_KEY", "GOOGLE_API_KEY", "GOOGLE_PLACES_API_KEY"].filter(Boolean);
+export const GOOGLE_KEY_VAR = GOOGLE_KEY_VARS.find((v) => process.env[v]) || null;
+const GOOGLE_KEY = GOOGLE_KEY_VAR ? process.env[GOOGLE_KEY_VAR] : "";
 const TRIPS_FILE = process.env.KX_TRIPS_FILE || fileURLToPath(new URL("../data/trips.json", import.meta.url));
 
 // ---------- small helpers ----------
@@ -80,8 +84,48 @@ async function photonOne(q, near) {
   };
 }
 
-// Photon first (fast, can run in parallel), Nominatim as backup (1 request/second).
+// Google Places Text Search (New): best match quality, plus rating and a Maps link.
+async function googlePlace(q, near) {
+  const body = { textQuery: q, languageCode: "en", regionCode: "DE", pageSize: 1 };
+  if (near) body.locationBias = { circle: { center: { latitude: near.lat, longitude: near.lon }, radius: 15000 } };
+  const r = await getJson("https://places.googleapis.com/v1/places:searchText", {
+    timeoutMs: 8000,
+    init: {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_KEY,
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.googleMapsUri,places.primaryTypeDisplayName,places.regularOpeningHours.weekdayDescriptions",
+      },
+    },
+  });
+  const p = r.places?.[0];
+  if (!p?.location) return { query: q, found: false };
+  return {
+    query: q,
+    found: true,
+    name: p.displayName?.text || q,
+    address: p.formattedAddress,
+    lat: p.location.latitude,
+    lon: p.location.longitude,
+    kind: p.primaryTypeDisplayName?.text,
+    rating: p.rating ?? null,
+    ratings: p.userRatingCount ?? null,
+    hours: p.regularOpeningHours?.weekdayDescriptions?.slice(0, 7) ?? null,
+    mapsUrl: p.googleMapsUri,
+    source: "google",
+  };
+}
+
+// Google Places first when a key is set, then Photon (fast, parallel), Nominatim as backup (1 request/second).
 async function geocodeOne(q, near) {
+  if (GOOGLE_KEY) {
+    try {
+      const r = await googlePlace(q, near);
+      if (r.found) return r;
+    } catch {}
+  }
   try {
     const r = await photonOne(q, near);
     if (r.found) return r;
@@ -308,7 +352,37 @@ export async function search_trains({ from, to, when, arriveBy = false, results 
 }
 
 // ---------- travel_between ----------
+function decodePolyline(str) {
+  const pts = [];
+  let i = 0, lat = 0, lng = 0;
+  while (i < str.length) {
+    for (const which of [0, 1]) {
+      let shift = 0, result = 0, byte;
+      do { byte = str.charCodeAt(i++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+      const d = result & 1 ? ~(result >> 1) : result >> 1;
+      if (which === 0) lat += d; else lng += d;
+    }
+    pts.push([lat / 1e5, lng / 1e5]);
+  }
+  return pts;
+}
+async function googleWalk(a, b) {
+  const r = await getJson("https://routes.googleapis.com/directions/v2:computeRoutes", {
+    timeoutMs: 8000,
+    init: {
+      method: "POST",
+      body: JSON.stringify({ origin: { location: { latLng: { latitude: a.lat, longitude: a.lon } } }, destination: { location: { latLng: { latitude: b.lat, longitude: b.lon } } }, travelMode: "WALK" }),
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": GOOGLE_KEY, "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline" },
+    },
+  });
+  const route = r.routes?.[0];
+  if (!route) throw new Error("no route");
+  return { km: round(route.distanceMeters / 1000), minutes: Math.round(parseInt(route.duration) / 60), geometry: route.polyline?.encodedPolyline ? decodePolyline(route.polyline.encodedPolyline) : undefined, source: "google" };
+}
 async function walk(a, b) {
+  if (GOOGLE_KEY) {
+    try { return await googleWalk(a, b); } catch {}
+  }
   try {
     const r = await getJson(`${OSRM_FOOT}/${a.lon},${a.lat};${b.lon},${b.lat}?overview=simplified&geometries=geojson`);
     const route = r.routes?.[0];
